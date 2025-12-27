@@ -27,17 +27,20 @@ function App() {
   const [dataPoints, setDataPoints] = useState([])
   const [selectedPoints, setSelectedPoints] = useState(new Set())
   const [isSelecting, setIsSelecting] = useState(false)
+  const [isBoxSelectMode, setIsBoxSelectMode] = useState(false)
   const [pointColor, setPointColor] = useState('#1890ff')
   const [selectedColor, setSelectedColor] = useState('#ff4d4f')
   const [colorMode, setColorMode] = useState('preset')
   const [customColor, setCustomColor] = useState('#1890ff')
-  const [pointSize, setPointSize] = useState('medium') // small, medium, large
+  const [pointSize, setPointSize] = useState('3') // 1-5: extra-small, small, medium, large, extra-large
   const [tableFilters, setTableFilters] = useState({
     timeRange: null,
     longitude: { min: '', max: '' },
     latitude: { min: '', max: '' },
-    speed: { min: '', max: '' }
+    speed: { min: '', max: '' },
+    altitude: { min: '', max: '' }
   })
+  const [pageSize, setPageSize] = useState(30)
   const mapRef = useRef(null)
 
   // 解析 CSV 文件
@@ -409,6 +412,24 @@ function App() {
       }
     }
 
+    // 高度筛选（范围）
+    if (tableFilters.altitude.min || tableFilters.altitude.max) {
+      const minAltitude = tableFilters.altitude.min ? parseFloat(tableFilters.altitude.min) : null
+      const maxAltitude = tableFilters.altitude.max ? parseFloat(tableFilters.altitude.max) : null
+      if (minAltitude !== null || maxAltitude !== null) {
+        filtered = filtered.filter(point => {
+          if (minAltitude !== null && maxAltitude !== null) {
+            return point.altitude >= minAltitude && point.altitude <= maxAltitude
+          } else if (minAltitude !== null) {
+            return point.altitude >= minAltitude
+          } else if (maxAltitude !== null) {
+            return point.altitude <= maxAltitude
+          }
+          return true
+        })
+      }
+    }
+
     return filtered
   }, [dataPoints, tableFilters])
 
@@ -421,7 +442,9 @@ function App() {
       tableFilters.latitude.min ||
       tableFilters.latitude.max ||
       tableFilters.speed.min ||
-      tableFilters.speed.max
+      tableFilters.speed.max ||
+      tableFilters.altitude.min ||
+      tableFilters.altitude.max
     )
   }, [tableFilters])
 
@@ -469,6 +492,14 @@ function App() {
       width: 100,
       sorter: (a, b) => a.speed - b.speed,
       render: (speed) => speed.toFixed(2)
+    },
+    {
+      title: '高度 (m)',
+      dataIndex: 'altitude',
+      key: 'altitude',
+      width: 100,
+      sorter: (a, b) => a.altitude - b.altitude,
+      render: (altitude) => altitude.toFixed(2)
     },
     {
       title: '精度 (m)',
@@ -520,6 +551,7 @@ function App() {
               dataPoints={dataPoints}
               selectedPoints={selectedPoints}
               isSelecting={isSelecting}
+              isBoxSelectMode={isBoxSelectMode}
               onPointSelect={handlePointSelect}
               onBoxSelect={handleBoxSelect}
               pointColor={pointColor}
@@ -582,9 +614,25 @@ function App() {
                       {isSelecting ? '退出选择' : '选择模式'}
                     </Button>
                     {isSelecting && (
-                      <span style={{ color: '#1890ff', fontSize: '11px' }}>
-                        Shift+拖拽框选
-                      </span>
+                      <>
+                        <Button 
+                          type={isBoxSelectMode ? "primary" : "default"}
+                          onClick={() => setIsBoxSelectMode(!isBoxSelectMode)}
+                          size="small"
+                        >
+                          {isBoxSelectMode ? '退出框选' : '框选模式'}
+                        </Button>
+                        {!isBoxSelectMode && (
+                          <span style={{ color: '#1890ff', fontSize: '11px' }}>
+                            Shift+拖拽框选
+                          </span>
+                        )}
+                        {isBoxSelectMode && (
+                          <span style={{ color: '#1890ff', fontSize: '11px' }}>
+                            直接拖拽框选
+                          </span>
+                        )}
+                      </>
                     )}
                     <Button 
                       onClick={handleClearSelection}
@@ -669,9 +717,11 @@ function App() {
                       size="small"
                       style={{ width: '100%' }}
                     >
-                      <Option value="small">小</Option>
-                      <Option value="medium">中</Option>
-                      <Option value="large">大</Option>
+                      <Option value="1">1</Option>
+                      <Option value="2">2</Option>
+                      <Option value="3">3</Option>
+                      <Option value="4">4</Option>
+                      <Option value="5">5</Option>
                     </Select>
                   </div>
                 </div>
@@ -703,23 +753,10 @@ function App() {
                   style={{ height: '100%', display: 'flex', flexDirection: 'column', margin: 0, borderRadius: 0 }}
                   bodyStyle={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column', padding: '12px' }}
                 >
-                  <Space direction="vertical" style={{ width: '100%', marginBottom: '12px' }} size="small">
-                    <Space wrap>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-                        <span style={{ fontSize: '12px', fontWeight: 500 }}>时间范围：</span>
-                        {timeRange.min && timeRange.max && (
-                          <span style={{ 
-                            fontSize: '11px', 
-                            color: '#595959', 
-                            backgroundColor: '#f5f5f5',
-                            padding: '2px 8px',
-                            borderRadius: '4px',
-                            fontFamily: 'monospace'
-                          }}>
-                            {dayjs(timeRange.min).format('YYYY-MM-DD HH:mm')} ～ {dayjs(timeRange.max).format('YYYY-MM-DD HH:mm')}
-                          </span>
-                        )}
-                      </div>
+                  <Space direction="vertical" style={{ width: '100%', marginBottom: '12px' }} size="middle">
+                    {/* 时间范围筛选 */}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                      <span style={{ fontSize: '12px', fontWeight: 500, minWidth: '60px' }}>时间范围：</span>
                       <RangePicker
                         size="small"
                         showTime
@@ -730,31 +767,55 @@ function App() {
                         disabledDate={disabledDate}
                         disabledTime={disabledTime}
                         defaultPickerValue={timeRange.defaultPicker ? [timeRange.defaultPicker, timeRange.defaultPicker] : undefined}
+                        style={{ flex: 1, maxWidth: '400px' }}
                       />
+                      {timeRange.min && timeRange.max && (
+                        <span style={{ 
+                          fontSize: '11px', 
+                          color: '#595959', 
+                          backgroundColor: '#f5f5f5',
+                          padding: '2px 8px',
+                          borderRadius: '4px',
+                          fontFamily: 'monospace',
+                          whiteSpace: 'nowrap'
+                        }}>
+                          {dayjs(timeRange.min).format('YYYY-MM-DD HH:mm')} ～ {dayjs(timeRange.max).format('YYYY-MM-DD HH:mm')}
+                        </span>
+                      )}
                       {tableFilters.timeRange && (
-                        <span style={{ fontSize: '11px', color: '#1890ff', marginLeft: '8px' }}>
+                        <span style={{ fontSize: '11px', color: '#1890ff', whiteSpace: 'nowrap' }}>
                           (已选中 {selectedPoints.size} 个点)
                         </span>
                       )}
-                    </Space>
-                    <Space wrap>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                        <span style={{ fontSize: '12px' }}>经度：</span>
+                    </div>
+
+                    {/* 数值范围筛选 */}
+                    <div style={{ 
+                      display: 'grid', 
+                      gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', 
+                      gap: '8px',
+                      padding: '8px',
+                      backgroundColor: '#fafafa',
+                      borderRadius: '4px',
+                      border: '1px solid #f0f0f0'
+                    }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flex: 1 }}>
+                        <span style={{ fontSize: '12px', fontWeight: 500, minWidth: '50px', flexShrink: 0 }}>经度：</span>
                         <Input
                           size="small"
-                          style={{ width: 90 }}
-                          placeholder="最小值"
+                          style={{ flex: 1 }}
+                          placeholder="最小"
                           value={tableFilters.longitude.min}
                           onChange={(e) => setTableFilters(prev => ({ 
                             ...prev, 
                             longitude: { ...prev.longitude, min: e.target.value }
                           }))}
                         />
-                        <span style={{ fontSize: '11px', color: '#8c8c8c' }}>~</span>
+                        <span style={{ fontSize: '11px', color: '#8c8c8c', margin: '0 2px', flexShrink: 0 }}>~</span>
                         <Input
                           size="small"
-                          style={{ width: 90 }}
-                          placeholder="最大值"
+                          style={{ flex: 1 }}
+                          placeholder="最大"
                           value={tableFilters.longitude.max}
                           onChange={(e) => setTableFilters(prev => ({ 
                             ...prev, 
@@ -762,23 +823,23 @@ function App() {
                           }))}
                         />
                       </div>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                        <span style={{ fontSize: '12px' }}>纬度：</span>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flex: 1 }}>
+                        <span style={{ fontSize: '12px', fontWeight: 500, minWidth: '50px', flexShrink: 0 }}>纬度：</span>
                         <Input
                           size="small"
-                          style={{ width: 90 }}
-                          placeholder="最小值"
+                          style={{ flex: 1 }}
+                          placeholder="最小"
                           value={tableFilters.latitude.min}
                           onChange={(e) => setTableFilters(prev => ({ 
                             ...prev, 
                             latitude: { ...prev.latitude, min: e.target.value }
                           }))}
                         />
-                        <span style={{ fontSize: '11px', color: '#8c8c8c' }}>~</span>
+                        <span style={{ fontSize: '11px', color: '#8c8c8c', margin: '0 2px', flexShrink: 0 }}>~</span>
                         <Input
                           size="small"
-                          style={{ width: 90 }}
-                          placeholder="最大值"
+                          style={{ flex: 1 }}
+                          placeholder="最大"
                           value={tableFilters.latitude.max}
                           onChange={(e) => setTableFilters(prev => ({ 
                             ...prev, 
@@ -786,23 +847,23 @@ function App() {
                           }))}
                         />
                       </div>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                        <span style={{ fontSize: '12px' }}>速度：</span>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flex: 1 }}>
+                        <span style={{ fontSize: '12px', fontWeight: 500, minWidth: '50px', flexShrink: 0 }}>速度：</span>
                         <Input
                           size="small"
-                          style={{ width: 70 }}
-                          placeholder="最小值"
+                          style={{ flex: 1 }}
+                          placeholder="最小"
                           value={tableFilters.speed.min}
                           onChange={(e) => setTableFilters(prev => ({ 
                             ...prev, 
                             speed: { ...prev.speed, min: e.target.value }
                           }))}
                         />
-                        <span style={{ fontSize: '11px', color: '#8c8c8c' }}>~</span>
+                        <span style={{ fontSize: '11px', color: '#8c8c8c', margin: '0 2px', flexShrink: 0 }}>~</span>
                         <Input
                           size="small"
-                          style={{ width: 70 }}
-                          placeholder="最大值"
+                          style={{ flex: 1 }}
+                          placeholder="最大"
                           value={tableFilters.speed.max}
                           onChange={(e) => setTableFilters(prev => ({ 
                             ...prev, 
@@ -810,6 +871,34 @@ function App() {
                           }))}
                         />
                       </div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flex: 1 }}>
+                        <span style={{ fontSize: '12px', fontWeight: 500, minWidth: '50px', flexShrink: 0 }}>高度：</span>
+                        <Input
+                          size="small"
+                          style={{ flex: 1 }}
+                          placeholder="最小"
+                          value={tableFilters.altitude.min}
+                          onChange={(e) => setTableFilters(prev => ({ 
+                            ...prev, 
+                            altitude: { ...prev.altitude, min: e.target.value }
+                          }))}
+                        />
+                        <span style={{ fontSize: '11px', color: '#8c8c8c', margin: '0 2px', flexShrink: 0 }}>~</span>
+                        <Input
+                          size="small"
+                          style={{ flex: 1 }}
+                          placeholder="最大"
+                          value={tableFilters.altitude.max}
+                          onChange={(e) => setTableFilters(prev => ({ 
+                            ...prev, 
+                            altitude: { ...prev.altitude, max: e.target.value }
+                          }))}
+                        />
+                      </div>
+                    </div>
+
+                    {/* 操作按钮 */}
+                    <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
                       <Button
                         size="small"
                         type="primary"
@@ -824,12 +913,13 @@ function App() {
                           timeRange: null,
                           longitude: { min: '', max: '' },
                           latitude: { min: '', max: '' },
-                          speed: { min: '', max: '' }
+                          speed: { min: '', max: '' },
+                          altitude: { min: '', max: '' }
                         })}
                       >
-                        清除
+                        清除筛选
                       </Button>
-                    </Space>
+                    </div>
                   </Space>
                   <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', minHeight: 0 }}>
                     <div style={{ flex: 1, overflow: 'auto', minHeight: 0 }}>
@@ -839,12 +929,15 @@ function App() {
                         rowKey="id"
                         size="small"
                         pagination={{
-                          pageSize: 30,
+                          pageSize: pageSize,
                           showSizeChanger: true,
                           showTotal: (total) => `共 ${total} 条`,
                           pageSizeOptions: ['20', '30', '50', '100'],
                           showQuickJumper: true,
-                          position: ['bottomRight']
+                          position: ['bottomRight'],
+                          onShowSizeChange: (current, size) => {
+                            setPageSize(size)
+                          }
                         }}
                         scroll={{ 
                           scrollToFirstRowOnChange: true

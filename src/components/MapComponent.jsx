@@ -126,11 +126,13 @@ function CanvasLayer({ dataPoints, selectedPoints, onPointClick, isSelecting, po
       // 绘制点（无边框）
       // 根据点大小设置半径
       const sizeMap = {
-        small: { normal: 3, selected: 4 },
-        medium: { normal: 4, selected: 6 },
-        large: { normal: 6, selected: 8 }
+        '1': { normal: 2, selected: 3 },   // extra-small
+        '2': { normal: 3, selected: 4 },   // small
+        '3': { normal: 4, selected: 6 },   // medium
+        '4': { normal: 6, selected: 8 },   // large
+        '5': { normal: 8, selected: 10 }   // extra-large
       }
-      const sizeConfig = sizeMap[pointSize] || sizeMap.medium
+      const sizeConfig = sizeMap[pointSize] || sizeMap['3']
       const radius = isSelected ? sizeConfig.selected : sizeConfig.normal
       
       ctx.beginPath()
@@ -218,31 +220,77 @@ function MapUpdater({ center, zoom }) {
 }
 
 // 框选组件
-function BoxSelector({ isSelecting, onBoxSelect, dataPoints, bounds }) {
+function BoxSelector({ isSelecting, isBoxSelectMode, onBoxSelect, dataPoints, bounds }) {
   const map = useMap()
   const [boxStart, setBoxStart] = useState(null)
   const [boxEnd, setBoxEnd] = useState(null)
   const [isDrawing, setIsDrawing] = useState(false)
+  const touchStartTimeRef = useRef(null)
+  const longPressTimerRef = useRef(null)
+
+  // 完成框选
+  const finishBoxSelect = useCallback((start, end) => {
+    if (!start || !end) return
+    
+    // 计算框选区域的最小尺寸，避免误触
+    const boxBounds = L.latLngBounds(start, end)
+    const boxSize = boxBounds.getNorthEast().distanceTo(boxBounds.getSouthWest())
+    
+    // 如果框选区域太小（小于 10 米），不执行选择
+    if (boxSize > 10) {
+      // 优化：只检查可见区域内的点
+      const visiblePoints = dataPoints.filter(point => 
+        bounds.contains([point.latitude, point.longitude])
+      )
+      
+      const selectedIds = visiblePoints
+        .filter(point => boxBounds.contains([point.latitude, point.longitude]))
+        .map(point => point.id)
+      
+      if (selectedIds.length > 0) {
+        onBoxSelect(selectedIds)
+      }
+    }
+  }, [dataPoints, bounds, onBoxSelect])
 
   useEffect(() => {
     if (!isSelecting) {
       setBoxStart(null)
       setBoxEnd(null)
       setIsDrawing(false)
+      map.dragging.enable()
       return
     }
 
+    // 框选模式下禁用地图拖动
+    if (isBoxSelectMode) {
+      map.dragging.disable()
+    } else {
+      map.dragging.enable()
+    }
+
     const handleMouseDown = (e) => {
-      // 只处理左键，并且需要按住 Shift 键
+      // 框选模式：直接拖拽框选
+      if (isBoxSelectMode) {
+        if (e.originalEvent.button !== 0) return
+        
+        e.originalEvent.preventDefault()
+        e.originalEvent.stopPropagation()
+        
+        setIsDrawing(true)
+        const latlng = e.latlng
+        setBoxStart(latlng)
+        setBoxEnd(latlng)
+        return
+      }
+      
+      // 非框选模式：需要按住 Shift 键
       if (e.originalEvent.button !== 0 || !e.originalEvent.shiftKey) {
         return
       }
       
-      // 阻止地图拖动
       e.originalEvent.preventDefault()
       e.originalEvent.stopPropagation()
-      
-      // 临时禁用地图拖动
       map.dragging.disable()
       
       setIsDrawing(true)
@@ -253,54 +301,100 @@ function BoxSelector({ isSelecting, onBoxSelect, dataPoints, bounds }) {
 
     const handleMouseMove = (e) => {
       if (isDrawing && boxStart) {
-        // 如果框选过程中释放了 Shift 键，取消框选
-        if (!e.originalEvent.shiftKey) {
-          setIsDrawing(false)
-          setBoxStart(null)
-          setBoxEnd(null)
-          map.dragging.enable()
-          return
+        if (isBoxSelectMode) {
+          // 框选模式：直接更新框选区域
+          setBoxEnd(e.latlng)
+        } else {
+          // 非框选模式：如果释放了 Shift 键，取消框选
+          if (!e.originalEvent.shiftKey) {
+            setIsDrawing(false)
+            setBoxStart(null)
+            setBoxEnd(null)
+            map.dragging.enable()
+            return
+          }
+          setBoxEnd(e.latlng)
         }
-        setBoxEnd(e.latlng)
       }
     }
 
     const handleMouseUp = (e) => {
       if (isDrawing && boxStart && boxEnd) {
-        // 计算框选区域的最小尺寸，避免误触
-        const boxBounds = L.latLngBounds(boxStart, boxEnd)
-        const boxSize = boxBounds.getNorthEast().distanceTo(boxBounds.getSouthWest())
-        
-        // 如果框选区域太小（小于 10 米），不执行选择
-        if (boxSize > 10) {
-          // 优化：只检查可见区域内的点
-          const visiblePoints = dataPoints.filter(point => 
-            bounds.contains([point.latitude, point.longitude])
-          )
-          
-          const selectedIds = visiblePoints
-            .filter(point => boxBounds.contains([point.latitude, point.longitude]))
-            .map(point => point.id)
-          
-          if (selectedIds.length > 0) {
-            onBoxSelect(selectedIds)
-          }
-        }
-        
+        finishBoxSelect(boxStart, boxEnd)
         setIsDrawing(false)
         setBoxStart(null)
         setBoxEnd(null)
       }
       
-      // 恢复地图拖动（如果之前被禁用）
-      if (isDrawing) {
+      if (isDrawing && !isBoxSelectMode) {
         map.dragging.enable()
+      }
+    }
+
+    // 触摸事件处理（移动端支持）
+    const handleTouchStart = (e) => {
+      if (!isBoxSelectMode) return
+      
+      const touch = e.originalEvent.touches[0]
+      if (!touch) return
+      
+      touchStartTimeRef.current = Date.now()
+      
+      // 长按开始框选（500ms）
+      longPressTimerRef.current = setTimeout(() => {
+        e.originalEvent.preventDefault()
+        e.originalEvent.stopPropagation()
+        
+        const containerPoint = L.point(touch.clientX, touch.clientY)
+        const mapContainer = map.getContainer()
+        const mapRect = mapContainer.getBoundingClientRect()
+        const relativePoint = L.point(
+          touch.clientX - mapRect.left,
+          touch.clientY - mapRect.top
+        )
+        const latlng = map.containerPointToLatLng(relativePoint)
+        
+        setIsDrawing(true)
+        setBoxStart(latlng)
+        setBoxEnd(latlng)
+      }, 500)
+    }
+
+    const handleTouchMove = (e) => {
+      if (!isBoxSelectMode || !isDrawing || !boxStart) return
+      
+      const touch = e.originalEvent.touches[0]
+      if (!touch) return
+      
+      e.originalEvent.preventDefault()
+      
+      const mapContainer = map.getContainer()
+      const mapRect = mapContainer.getBoundingClientRect()
+      const relativePoint = L.point(
+        touch.clientX - mapRect.left,
+        touch.clientY - mapRect.top
+      )
+      const latlng = map.containerPointToLatLng(relativePoint)
+      setBoxEnd(latlng)
+    }
+
+    const handleTouchEnd = (e) => {
+      if (longPressTimerRef.current) {
+        clearTimeout(longPressTimerRef.current)
+        longPressTimerRef.current = null
+      }
+      
+      if (isDrawing && boxStart && boxEnd) {
+        finishBoxSelect(boxStart, boxEnd)
+        setIsDrawing(false)
+        setBoxStart(null)
+        setBoxEnd(null)
       }
     }
 
     // 监听键盘事件，如果释放 Shift 键时正在框选，取消框选
     const handleKeyUp = (e) => {
-      if (e.key === 'Shift' && isDrawing) {
+      if (e.key === 'Shift' && isDrawing && !isBoxSelectMode) {
         setIsDrawing(false)
         setBoxStart(null)
         setBoxEnd(null)
@@ -311,17 +405,25 @@ function BoxSelector({ isSelecting, onBoxSelect, dataPoints, bounds }) {
     map.on('mousedown', handleMouseDown)
     map.on('mousemove', handleMouseMove)
     map.on('mouseup', handleMouseUp)
+    map.on('touchstart', handleTouchStart)
+    map.on('touchmove', handleTouchMove)
+    map.on('touchend', handleTouchEnd)
     window.addEventListener('keyup', handleKeyUp)
 
     return () => {
       map.off('mousedown', handleMouseDown)
       map.off('mousemove', handleMouseMove)
       map.off('mouseup', handleMouseUp)
+      map.off('touchstart', handleTouchStart)
+      map.off('touchmove', handleTouchMove)
+      map.off('touchend', handleTouchEnd)
       window.removeEventListener('keyup', handleKeyUp)
-      // 确保恢复地图拖动
+      if (longPressTimerRef.current) {
+        clearTimeout(longPressTimerRef.current)
+      }
       map.dragging.enable()
     }
-  }, [isSelecting, isDrawing, boxStart, boxEnd, map, dataPoints, bounds, onBoxSelect])
+  }, [isSelecting, isBoxSelectMode, isDrawing, boxStart, boxEnd, map, finishBoxSelect])
 
   if (!isSelecting || !boxStart || !boxEnd) {
     return null
@@ -367,6 +469,7 @@ const MapComponent = forwardRef(({
   dataPoints, 
   selectedPoints, 
   isSelecting,
+  isBoxSelectMode = false,
   onPointSelect,
   onBoxSelect,
   pointColor = '#1890ff',
@@ -433,6 +536,7 @@ const MapComponent = forwardRef(({
           />
           <BoxSelector 
             isSelecting={isSelecting}
+            isBoxSelectMode={isBoxSelectMode}
             onBoxSelect={onBoxSelect}
             dataPoints={dataPoints}
             bounds={bounds}
