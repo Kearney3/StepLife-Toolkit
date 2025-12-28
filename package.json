@@ -8,17 +8,17 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "react": "^18.2.0",
-    "react-dom": "^18.2.0",
-    "antd": "^5.12.8",
+    "react": "^19.2.3",
+    "react-dom": "^19.2.3",
+    "antd": "^6.1.2",
     "leaflet": "^1.9.4",
-    "react-leaflet": "^4.2.1",
+    "react-leaflet": "^5.0.0",
     "papaparse": "^5.4.1",
     "dayjs": "^1.11.10"
   },
   "devDependencies": {
-    "@types/react": "^18.2.43",
-    "@types/react-dom": "^18.2.17",
+    "@types/react": "^19.2.7",
+    "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^4.2.1",
     "vite": "^5.0.8"
   }
