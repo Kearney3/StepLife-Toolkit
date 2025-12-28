@@ -30,3 +30,93 @@
   overflow: hidden;
 }
 
+/* 响应式布局优化 */
+@media (max-width: 768px) {
+  .app-header {
+    padding: 0 12px;
+  }
+  
+  .box-select-hint {
+    display: none !important;
+  }
+  
+  /* 分页器优化 */
+  .ant-pagination {
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+  }
+  
+  .ant-pagination-options {
+    margin-left: 0 !important;
+  }
+  
+  /* 分页器换行优化 - 全局样式 */
+  .ant-pagination {
+    align-items: center;
+    justify-content: center;
+  }
+  
+  .ant-pagination .ant-pagination-prev,
+  .ant-pagination .ant-pagination-next,
+  .ant-pagination .ant-pagination-jump-prev,
+  .ant-pagination .ant-pagination-jump-next,
+  .ant-pagination .ant-pagination-item {
+    margin: 0 2px;
+    flex-shrink: 0;
+  }
+  
+  .ant-pagination .ant-pagination-options {
+    flex-shrink: 0;
+    margin-left: 8px;
+  }
+  
+  /* 当分页器换行时，确保两行都居中对齐 */
+  .ant-pagination > * {
+    flex-shrink: 0;
+  }
+  
+  /* 优化分页器在换行时的布局 */
+  .ant-table-pagination {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 8px;
+    row-gap: 8px;
+  }
+  
+  .ant-table-pagination .ant-pagination {
+    margin: 0;
+    flex-wrap: wrap;
+    justify-content: center;
+    align-items: center;
+  }
+  
+  /* 确保分页器元素在换行时保持合理的间距 */
+  .ant-table-pagination .ant-pagination-prev,
+  .ant-table-pagination .ant-pagination-next,
+  .ant-table-pagination .ant-pagination-items,
+  .ant-table-pagination .ant-pagination-options {
+    margin: 0;
+  }
+}
+
+@media (max-width: 480px) {
+  .app-header {
+    padding: 0 8px;
+  }
+  
+  /* 分页器简化模式优化 */
+  .ant-pagination-simple {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 8px;
+  }
+  
+  .ant-pagination-simple .ant-pagination-simple-pager {
+    margin: 0;
+  }
+}
+

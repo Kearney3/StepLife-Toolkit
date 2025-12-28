@@ -1,6 +1,6 @@
 import React, { useState, useRef, useCallback, useMemo, useEffect } from 'react'
 import { Layout, Upload, Button, Space, DatePicker, message, Card, Typography, Select, ColorPicker, Table, Input } from 'antd'
-import { UploadOutlined, DeleteOutlined, DownloadOutlined, ClearOutlined, UpOutlined, DownOutlined, SelectOutlined, CheckCircleOutlined, CloseCircleOutlined, DeleteRowOutlined, DatabaseOutlined, ClockCircleOutlined, SwapOutlined, SearchOutlined } from '@ant-design/icons'
+import { UploadOutlined, DeleteOutlined, DownloadOutlined, ClearOutlined, UpOutlined, DownOutlined, SelectOutlined, CheckCircleOutlined, CloseCircleOutlined, DeleteRowOutlined, DatabaseOutlined, ClockCircleOutlined, SwapOutlined, SearchOutlined, GithubOutlined, LeftOutlined, RightOutlined } from '@ant-design/icons'
 import Papa from 'papaparse'
 import dayjs from 'dayjs'
 import MapComponent from './components/MapComponent'
@@ -153,11 +153,26 @@ function App() {
     altitude: { min: '', max: '' }
   })
   const [pageSize, setPageSize] = useState(30)
-  const [filtersCollapsed, setFiltersCollapsed] = useState(false)
-  const [overviewCollapsed, setOverviewCollapsed] = useState(false)
+  const [filtersCollapsed, setFiltersCollapsed] = useState(true)
+  const [overviewCollapsed, setOverviewCollapsed] = useState(true)
+  const [styleConfigCollapsed, setStyleConfigCollapsed] = useState(false)
+  const [isCompact, setIsCompact] = useState(false)
+  const [isVeryCompact, setIsVeryCompact] = useState(false)
   const mapRef = useRef(null)
   const processedFilesRef = useRef(new Set())
   const performanceWarningShownRef = useRef(false)
+
+  // 监听窗口大小变化，优化分页器布局
+  useEffect(() => {
+    const handleResize = () => {
+      const width = window.innerWidth
+      setIsCompact(width < 768)
+      setIsVeryCompact(width < 480)
+    }
+    handleResize() // 初始检查
+    window.addEventListener('resize', handleResize)
+    return () => window.removeEventListener('resize', handleResize)
+  }, [])
 
   // 保存分隔比例到localStorage
   useEffect(() => {
@@ -901,10 +916,19 @@ function App() {
 
   return (
     <Layout className="app-layout">
-      <Header className="app-header">
-        <Title level={3} style={{ color: '#fff', margin: 0 }}>
+      <Header className="app-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
+        <Title level={3} style={{ color: '#fff', margin: 0, fontSize: 'clamp(14px, 2vw, 20px)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: '1 1 auto', minWidth: 0 }}>
           StepLife Toolkit - 一生足迹坐标管理工具
         </Title>
+        <Button
+          type="text"
+          icon={<GithubOutlined />}
+          href="https://github.com/Kearney3/StepLife-Toolkit"
+          target="_blank"
+          rel="noopener noreferrer"
+          style={{ color: '#fff', fontSize: '18px', flexShrink: 0 }}
+          title="查看 GitHub 仓库"
+        />
       </Header>
       <Content className="app-content">
         <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
@@ -930,7 +954,7 @@ function App() {
           {/* 右侧配置和表格区域 */}
           <div style={{ flex: `0 0 ${100 - splitRatio}%`, minWidth: '300px', display: 'flex', flexDirection: 'column', borderLeft: '1px solid #d9d9d9', overflow: 'hidden', background: '#f0f2f5' }}>
             {/* 配置区域 */}
-            <div style={{ padding: '12px', background: '#fff', borderBottom: '1px solid #d9d9d9', overflowY: 'auto', flex: '0 0 auto' }}>
+            <div style={{ padding: '12px', background: '#fff', overflowY: 'auto', flex: '0 0 auto' }}>
               <Space direction="vertical" style={{ width: '100%' }} size="middle">
                 {/* 文件操作卡片 */}
                 <Card
@@ -1003,25 +1027,26 @@ function App() {
                       padding: '8px',
                       backgroundColor: '#fafafa',
                       borderRadius: '6px',
-                      border: '1px solid #f0f0f0'
+                      border: '1px solid #f0f0f0',
+                      flexWrap: 'wrap'
                     }}>
                       <Button
                         type={isSelecting ? "primary" : "default"}
                         icon={<SelectOutlined />}
                         onClick={handleToggleSelectMode}
                         size="small"
-                        style={{ flex: 1 }}
+                        style={{ flex: '1 1 auto', minWidth: '100px' }}
                       >
                         {isSelecting ? '退出选择' : '进入选择'}
                       </Button>
 
                       {isSelecting && (
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flex: 1 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flex: '1 1 auto', minWidth: 0 }}>
                           <Button
                             type={isBoxSelectMode ? "primary" : "default"}
                             onClick={() => setIsBoxSelectMode(!isBoxSelectMode)}
                             size="small"
-                            style={{ flex: 1 }}
+                            style={{ flex: '1 1 auto', minWidth: 0 }}
                           >
                             {isBoxSelectMode ? '退出框选' : '框选模式'}
                           </Button>
@@ -1029,8 +1054,8 @@ function App() {
                             fontSize: '11px',
                             color: '#8c8c8c',
                             whiteSpace: 'nowrap',
-                            minWidth: '80px'
-                          }}>
+                            flexShrink: 0
+                          }} className="box-select-hint">
                             {isBoxSelectMode ? '直接拖拽' : 'Shift+拖拽'}
                           </span>
                         </div>
@@ -1046,7 +1071,7 @@ function App() {
                       {/* 选择操作组 */}
                       <div style={{
                         display: 'grid',
-                        gridTemplateColumns: '1fr 1fr 1fr',
+                        gridTemplateColumns: 'repeat(auto-fit, minmax(80px, 1fr))',
                         gap: '6px'
                       }}>
                         <Button
@@ -1090,10 +1115,12 @@ function App() {
                         backgroundColor: '#f5f5f5',
                         borderRadius: '4px',
                         fontSize: '11px',
-                        color: '#666'
+                        color: '#666',
+                        flexWrap: 'wrap',
+                        gap: '4px'
                       }}>
-                        <span>筛选: <strong>{filteredDataPoints.length.toLocaleString()}</strong></span>
-                        <span>已选: <strong style={{ color: selectedPoints.size > 0 ? '#1890ff' : '#666' }}>{selectedPoints.size.toLocaleString()}</strong></span>
+                        <span style={{ whiteSpace: 'nowrap' }}>筛选: <strong>{filteredDataPoints.length.toLocaleString()}</strong></span>
+                        <span style={{ whiteSpace: 'nowrap' }}>已选: <strong style={{ color: selectedPoints.size > 0 ? '#1890ff' : '#666' }}>{selectedPoints.size.toLocaleString()}</strong></span>
                       </div>
 
                       {/* 删除操作 */}
@@ -1114,7 +1141,18 @@ function App() {
                 {/* 样式配置卡片 */}
                 <Card
                   size="small"
-                  title="样式配置"
+                  title={
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                      <span>样式配置</span>
+                      <Button
+                        type="text"
+                        size="small"
+                        icon={styleConfigCollapsed ? <DownOutlined /> : <UpOutlined />}
+                        onClick={() => setStyleConfigCollapsed(!styleConfigCollapsed)}
+                        style={{ fontSize: '11px', color: '#8c8c8c' }}
+                      />
+                    </div>
+                  }
                   headStyle={{
                     fontSize: '12px',
                     fontWeight: 500,
@@ -1123,83 +1161,104 @@ function App() {
                     minHeight: 'auto'
                   }}
                   bodyStyle={{
-                    padding: '12px'
+                    padding: styleConfigCollapsed ? '0px' : '12px'
                   }}
                 >
-                  <div style={{ display: 'grid', gridTemplateColumns: 'auto 1fr auto 1fr', alignItems: 'center', gap: '8px 12px' }}>
-                    <span style={{ fontSize: '12px' }}>颜色</span>
-                    {colorMode === 'preset' ? (
-                      <Select
-                        value={pointColor}
-                        onChange={(value) => {
-                          if (value === 'custom') {
-                            setColorMode('custom')
-                            setPointColor(customColor)
-                            setSelectedColor(getContrastColor(customColor))
-                          } else {
-                            const preset = PRESET_COLORS.find(p => p.color === value) || PRESET_COLORS[0]
-                            setPointColor(preset.color)
-                            setSelectedColor(preset.selectedColor)
-                          }
-                        }}
-                        size="small"
-                        style={{ width: '100%' }}
-                      >
-                        {PRESET_COLORS.map(preset => (
-                          <Option
-                            key={preset.color || 'custom'}
-                            value={preset.color || 'custom'}
+                  <div
+                    style={{
+                      overflow: 'hidden',
+                      transform: styleConfigCollapsed ? 'scaleY(0)' : 'scaleY(1)',
+                      transformOrigin: 'top',
+                      transition: 'transform 0.25s cubic-bezier(0.4, 0.0, 0.2, 1), opacity 0.2s ease-out',
+                      opacity: styleConfigCollapsed ? 0 : 1,
+                      height: styleConfigCollapsed ? '0px' : 'auto'
+                    }}
+                  >
+                    <div style={{ 
+                      display: 'grid', 
+                      gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))',
+                      alignItems: 'center', 
+                      gap: '8px 12px' 
+                    }}>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', minWidth: 0 }}>
+                        <span style={{ fontSize: '12px', whiteSpace: 'nowrap' }}>颜色</span>
+                        {colorMode === 'preset' ? (
+                          <Select
+                            value={pointColor}
+                            onChange={(value) => {
+                              if (value === 'custom') {
+                                setColorMode('custom')
+                                setPointColor(customColor)
+                                setSelectedColor(getContrastColor(customColor))
+                              } else {
+                                const preset = PRESET_COLORS.find(p => p.color === value) || PRESET_COLORS[0]
+                                setPointColor(preset.color)
+                                setSelectedColor(preset.selectedColor)
+                              }
+                            }}
+                            size="small"
+                            style={{ width: '100%' }}
                           >
-                            <Space>
-                              {preset.color && (
-                                <span
-                                  style={{
-                                    display: 'inline-block',
-                                    width: 12,
-                                    height: 12,
-                                    backgroundColor: preset.color,
-                                    borderRadius: '50%',
-                                    border: '1px solid #d9d9d9'
-                                  }}
-                                />
-                              )}
-                              {preset.name}
-                            </Space>
-                          </Option>
-                        ))}
-                      </Select>
-                    ) : (
-                      <ColorPicker
-                        value={pointColor}
-                        onChange={(color) => {
-                          const hexColor = color.toHexString()
-                          setPointColor(hexColor)
-                          setCustomColor(hexColor)
-                          setSelectedColor(getContrastColor(hexColor))
-                        }}
-                        size="small"
-                        showText
-                      />
-                    )}
-                    <span style={{ fontSize: '12px' }}>大小</span>
-                    <Select
-                      value={pointSize}
-                      onChange={setPointSize}
-                      size="small"
-                      style={{ width: '100%' }}
-                    >
-                      <Option value="1">1</Option>
-                      <Option value="2">2</Option>
-                      <Option value="3">3</Option>
-                      <Option value="4">4</Option>
-                      <Option value="5">5</Option>
-                    </Select>
+                            {PRESET_COLORS.map(preset => (
+                              <Option
+                                key={preset.color || 'custom'}
+                                value={preset.color || 'custom'}
+                              >
+                                <Space>
+                                  {preset.color && (
+                                    <span
+                                      style={{
+                                        display: 'inline-block',
+                                        width: 12,
+                                        height: 12,
+                                        backgroundColor: preset.color,
+                                        borderRadius: '50%',
+                                        border: '1px solid #d9d9d9'
+                                      }}
+                                    />
+                                  )}
+                                  {preset.name}
+                                </Space>
+                              </Option>
+                            ))}
+                          </Select>
+                        ) : (
+                          <ColorPicker
+                            value={pointColor}
+                            onChange={(color) => {
+                              const hexColor = color.toHexString()
+                              setPointColor(hexColor)
+                              setCustomColor(hexColor)
+                              setSelectedColor(getContrastColor(hexColor))
+                            }}
+                            size="small"
+                            showText
+                          />
+                        )}
+                      </div>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', minWidth: 0 }}>
+                        <span style={{ fontSize: '12px', whiteSpace: 'nowrap' }}>大小</span>
+                        <Select
+                          value={pointSize}
+                          onChange={setPointSize}
+                          size="small"
+                          style={{ width: '100%' }}
+                        >
+                          <Option value="1">1</Option>
+                          <Option value="2">2</Option>
+                          <Option value="3">3</Option>
+                          <Option value="4">4</Option>
+                          <Option value="5">5</Option>
+                        </Select>
+                      </div>
+                    </div>
                   </div>
                 </Card>
 
                 {/* 数据概览卡片 */}
                 <Card
                   size="small"
+                  bordered={false}
                   title={
                     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                       <span>数据概览</span>
@@ -1217,7 +1276,8 @@ function App() {
                     fontWeight: 500,
                     color: '#595959',
                     padding: '8px 12px',
-                    minHeight: 'auto'
+                    minHeight: 'auto',
+                    borderBottom: 'none'
                   }}
                   bodyStyle={{
                     padding: overviewCollapsed ? '0px' : '12px'
@@ -1311,6 +1371,7 @@ function App() {
             <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', background: '#fff' }}>
                 <Card 
                   size="small"
+                  bordered={false}
                   style={{ height: '100%', display: 'flex', flexDirection: 'column', margin: 0, borderRadius: 0 }}
                   bodyStyle={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column', padding: '12px' }}
                 >
@@ -1318,6 +1379,7 @@ function App() {
                     {/* 数据筛选器卡片 */}
                     <Card
                       size="small"
+                      bordered={false}
                       title={
                         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                           <span>数据筛选器</span>
@@ -1335,7 +1397,8 @@ function App() {
                         fontWeight: 500,
                         color: '#595959',
                         padding: '8px 12px',
-                        minHeight: 'auto'
+                        minHeight: 'auto',
+                        borderBottom: 'none'
                       }}
                       bodyStyle={{
                         padding: filtersCollapsed ? '0px' : '12px'
@@ -1352,39 +1415,41 @@ function App() {
                           height: filtersCollapsed ? '0px' : 'auto'
                         }}
                       >
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap', marginTop: '12px' }}>
-                        <span style={{ fontSize: '12px', fontWeight: 500, minWidth: '60px' }}>时间筛选：</span>
-                        <RangePicker
-                          size="small"
-                          showTime
-                          format="YYYY-MM-DD HH:mm:ss"
-                          value={tableFilters.timeRange}
-                          onChange={handleTimeRangeSelect}
-                          placeholder={['开始', '结束']}
-                          disabledDate={disabledDate}
-                          disabledTime={disabledTime}
-                          defaultPickerValue={timeRange.defaultPicker ? [timeRange.defaultPicker, timeRange.defaultPicker] : undefined}
-                          style={{ flex: 1, maxWidth: '400px' }}
-                        />
-                        {appliedFilters.timeRange && (
-                          <span style={{ fontSize: '11px', color: '#1890ff', whiteSpace: 'nowrap' }}>
-                            (已应用筛选)
-                          </span>
-                        )}
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '12px' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                          <span style={{ fontSize: '12px', fontWeight: 500, flexShrink: 0, minWidth: '60px' }}>时间筛选：</span>
+                          <RangePicker
+                            size="small"
+                            showTime
+                            format="YYYY-MM-DD HH:mm:ss"
+                            value={tableFilters.timeRange}
+                            onChange={handleTimeRangeSelect}
+                            placeholder={['开始', '结束']}
+                            disabledDate={disabledDate}
+                            disabledTime={disabledTime}
+                            defaultPickerValue={timeRange.defaultPicker ? [timeRange.defaultPicker, timeRange.defaultPicker] : undefined}
+                            style={{ flex: '1 1 auto', minWidth: '280px', maxWidth: '100%' }}
+                          />
+                          {appliedFilters.timeRange && (
+                            <span style={{ fontSize: '11px', color: '#1890ff', whiteSpace: 'nowrap', flexShrink: 0 }}>
+                              (已应用筛选)
+                            </span>
+                          )}
+                        </div>
                       </div>
 
                         {/* 数值范围筛选 */}
                         <div style={{
                           display: 'grid',
-                          gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
+                          gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
                           gap: '8px',
                           padding: '8px',
                           backgroundColor: '#fafafa',
                           borderRadius: '4px',
                           border: '1px solid #f0f0f0'
                         }}>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flex: 1 }}>
-                            <span style={{ fontSize: '12px', fontWeight: 500, minWidth: '50px', flexShrink: 0 }}>经度：</span>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flex: 1, minWidth: 0 }}>
+                            <span style={{ fontSize: '12px', fontWeight: 500, flexShrink: 0, minWidth: '40px' }}>经度：</span>
                             <Input
                               size="small"
                               style={{ flex: 1 }}
@@ -1407,8 +1472,8 @@ function App() {
                               }))}
                             />
                           </div>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flex: 1 }}>
-                            <span style={{ fontSize: '12px', fontWeight: 500, minWidth: '50px', flexShrink: 0 }}>纬度：</span>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flex: 1, minWidth: 0 }}>
+                            <span style={{ fontSize: '12px', fontWeight: 500, flexShrink: 0, minWidth: '40px' }}>纬度：</span>
                             <Input
                               size="small"
                               style={{ flex: 1 }}
@@ -1431,8 +1496,8 @@ function App() {
                               }))}
                             />
                           </div>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flex: 1 }}>
-                            <span style={{ fontSize: '12px', fontWeight: 500, minWidth: '50px', flexShrink: 0 }}>速度：</span>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flex: 1, minWidth: 0 }}>
+                            <span style={{ fontSize: '12px', fontWeight: 500, flexShrink: 0, minWidth: '40px' }}>速度：</span>
                             <Input
                               size="small"
                               style={{ flex: 1 }}
@@ -1455,8 +1520,8 @@ function App() {
                               }))}
                             />
                           </div>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flex: 1 }}>
-                            <span style={{ fontSize: '12px', fontWeight: 500, minWidth: '50px', flexShrink: 0 }}>高度：</span>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flex: 1, minWidth: 0 }}>
+                            <span style={{ fontSize: '12px', fontWeight: 500, flexShrink: 0, minWidth: '40px' }}>高度：</span>
                             <Input
                               size="small"
                               style={{ flex: 1 }}
@@ -1482,14 +1547,14 @@ function App() {
                         </div>
 
                         {/* 应用和清除筛选按钮 */}
-                        <div style={{ display: 'flex', justifyContent: 'space-between', gap: '8px', marginTop: '12px' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', gap: '8px', marginTop: '12px', flexWrap: 'wrap' }}>
                           <Button
                             type="primary"
                             icon={<SearchOutlined />}
                             onClick={handleApplyFilters}
                             disabled={!hasFilters}
                             size="small"
-                            style={{ flex: 1 }}
+                            style={{ flex: '1 1 auto', minWidth: '100px' }}
                           >
                             应用筛选
                           </Button>
@@ -1509,6 +1574,7 @@ function App() {
                               message.success('已清除所有筛选条件')
                             }}
                             disabled={!hasFilters && !hasAppliedFilters}
+                            style={{ flex: '1 1 auto', minWidth: '100px' }}
                           >
                             清除筛选
                           </Button>
@@ -1527,18 +1593,34 @@ function App() {
                         pagination={{
                           pageSize: pageSize,
                           showSizeChanger: true,
-                          showTotal: (total, range) => {
-                            const actualTotal = filteredDataPoints.length
-                            if (actualTotal > 50000) {
-                              return `显示 ${range[0]}-${range[1]} 条（共 ${actualTotal.toLocaleString()} 条，已采样显示）`
-                            }
-                            return `共 ${actualTotal.toLocaleString()} 条`
-                          },
+                          showTotal: false,
                           pageSizeOptions: ['20', '30', '50', '100', '200'],
-                          showQuickJumper: true,
-                          position: ['bottomRight'],
+                          showQuickJumper: false,
+                          position: isCompact ? ['bottomCenter'] : ['bottomRight'],
+                          size: 'small',
+                          simple: isVeryCompact,
+                          responsive: true,
                           onShowSizeChange: (current, size) => {
                             setPageSize(size)
+                          },
+                          style: {
+                            marginTop: '16px',
+                            padding: '8px 0',
+                            display: 'flex',
+                            flexWrap: 'wrap',
+                            justifyContent: isCompact ? 'center' : 'flex-end',
+                            alignItems: 'center',
+                            gap: '8px',
+                            rowGap: '8px'
+                          },
+                          itemRender: (page, type, originalElement) => {
+                            if (type === 'prev') {
+                              return <Button size="small" icon={<LeftOutlined />} title="上一页" />
+                            }
+                            if (type === 'next') {
+                              return <Button size="small" icon={<RightOutlined />} title="下一页" />
+                            }
+                            return originalElement
                           }
                         }}
                         scroll={{
