@@ -1,6 +1,6 @@
 import React, { useState, useRef, useCallback, useMemo, useEffect } from 'react'
 import { Layout, Upload, Button, Space, DatePicker, message, Card, Typography, Select, ColorPicker, Table, Input } from 'antd'
-import { UploadOutlined, DeleteOutlined, DownloadOutlined, ClearOutlined, UpOutlined, DownOutlined, SelectOutlined, CheckCircleOutlined, CloseCircleOutlined, DeleteRowOutlined, DatabaseOutlined, ClockCircleOutlined, SwapOutlined } from '@ant-design/icons'
+import { UploadOutlined, DeleteOutlined, DownloadOutlined, ClearOutlined, UpOutlined, DownOutlined, SelectOutlined, CheckCircleOutlined, CloseCircleOutlined, DeleteRowOutlined, DatabaseOutlined, ClockCircleOutlined, SwapOutlined, SearchOutlined } from '@ant-design/icons'
 import Papa from 'papaparse'
 import dayjs from 'dayjs'
 import MapComponent from './components/MapComponent'
@@ -138,6 +138,14 @@ function App() {
   const [customColor, setCustomColor] = useState('#1890ff')
   const [pointSize, setPointSize] = useState('3') // 1-5: extra-small, small, medium, large, extra-large
   const [tableFilters, setTableFilters] = useState({
+    timeRange: null,
+    longitude: { min: '', max: '' },
+    latitude: { min: '', max: '' },
+    speed: { min: '', max: '' },
+    altitude: { min: '', max: '' }
+  })
+  // 已应用的筛选条件（点击应用筛选按钮后才生效）
+  const [appliedFilters, setAppliedFilters] = useState({
     timeRange: null,
     longitude: { min: '', max: '' },
     latitude: { min: '', max: '' },
@@ -297,41 +305,47 @@ function App() {
     message.success('已取消选择')
   }
 
-  // 处理时间范围选择，自动选中该时间段内的所有坐标点 - 优化版本
+  // 处理时间范围选择（仅更新筛选条件，不立即应用）
   const handleTimeRangeSelect = useCallback((dates) => {
     if (!dates || dates.length !== 2) {
       setTableFilters(prev => ({ ...prev, timeRange: null }))
-      setSelectedPoints(new Set())
       return
     }
-
-    const [start, end] = dates
-    const startTime = start.unix()
-    const endTime = end.unix()
-
-    // 优化：使用单次遍历选中该时间段内的所有坐标点
-    const pointIds = new Set()
-    let count = 0
-    
-    for (let i = 0; i < dataPoints.length; i++) {
-      const point = dataPoints[i]
-      if (point.dataTime >= startTime && point.dataTime <= endTime) {
-        pointIds.add(point.id)
-        count++
-      }
-    }
-
-    if (count === 0) {
-      message.warning('该时间段内没有坐标点')
-      setTableFilters(prev => ({ ...prev, timeRange: dates }))
-      setSelectedPoints(new Set())
-      return
-    }
-
-    setSelectedPoints(pointIds)
     setTableFilters(prev => ({ ...prev, timeRange: dates }))
-    message.success(`已选中 ${count.toLocaleString()} 个坐标点`)
-  }, [dataPoints])
+  }, [])
+
+  // 应用筛选条件
+  const handleApplyFilters = useCallback(() => {
+    // 应用筛选条件
+    setAppliedFilters({ ...tableFilters })
+    
+    // 如果时间范围筛选已应用，自动选中该时间段内的点
+    if (tableFilters.timeRange && tableFilters.timeRange.length === 2) {
+      const [start, end] = tableFilters.timeRange
+      const startTime = start.unix()
+      const endTime = end.unix()
+
+      const pointIds = new Set()
+      let count = 0
+      
+      for (let i = 0; i < dataPoints.length; i++) {
+        const point = dataPoints[i]
+        if (point.dataTime >= startTime && point.dataTime <= endTime) {
+          pointIds.add(point.id)
+          count++
+        }
+      }
+
+      if (count > 0) {
+        setSelectedPoints(pointIds)
+        message.success(`已应用筛选，选中 ${count.toLocaleString()} 个坐标点`)
+      } else {
+        message.success('已应用筛选')
+      }
+    } else {
+      message.success('已应用筛选')
+    }
+  }, [tableFilters, dataPoints])
 
   // 导出 CSV
   const handleExport = () => {
@@ -623,23 +637,23 @@ function App() {
     }
   }, [timeRange])
 
-  // 筛选后的数据点 - 优化版本，支持大数据量
+  // 筛选后的数据点 - 使用已应用的筛选条件
   const filteredDataPoints = useMemo(() => {
     // 优化：单次遍历应用所有筛选条件，避免多次遍历
     const filters = []
     
     // 时间范围筛选
-    if (tableFilters.timeRange && tableFilters.timeRange.length === 2) {
-      const [start, end] = tableFilters.timeRange
+    if (appliedFilters.timeRange && appliedFilters.timeRange.length === 2) {
+      const [start, end] = appliedFilters.timeRange
       const startTime = start.unix()
       const endTime = end.unix()
       filters.push(point => point.dataTime >= startTime && point.dataTime <= endTime)
     }
 
     // 经度筛选（范围）
-    if (tableFilters.longitude.min || tableFilters.longitude.max) {
-      const minLng = tableFilters.longitude.min ? parseFloat(tableFilters.longitude.min) : null
-      const maxLng = tableFilters.longitude.max ? parseFloat(tableFilters.longitude.max) : null
+    if (appliedFilters.longitude.min || appliedFilters.longitude.max) {
+      const minLng = appliedFilters.longitude.min ? parseFloat(appliedFilters.longitude.min) : null
+      const maxLng = appliedFilters.longitude.max ? parseFloat(appliedFilters.longitude.max) : null
       if (minLng !== null || maxLng !== null) {
         filters.push(point => {
           if (minLng !== null && maxLng !== null) {
@@ -655,9 +669,9 @@ function App() {
     }
 
     // 纬度筛选（范围）
-    if (tableFilters.latitude.min || tableFilters.latitude.max) {
-      const minLat = tableFilters.latitude.min ? parseFloat(tableFilters.latitude.min) : null
-      const maxLat = tableFilters.latitude.max ? parseFloat(tableFilters.latitude.max) : null
+    if (appliedFilters.latitude.min || appliedFilters.latitude.max) {
+      const minLat = appliedFilters.latitude.min ? parseFloat(appliedFilters.latitude.min) : null
+      const maxLat = appliedFilters.latitude.max ? parseFloat(appliedFilters.latitude.max) : null
       if (minLat !== null || maxLat !== null) {
         filters.push(point => {
           if (minLat !== null && maxLat !== null) {
@@ -673,9 +687,9 @@ function App() {
     }
 
     // 速度筛选（范围）
-    if (tableFilters.speed.min || tableFilters.speed.max) {
-      const minSpeed = tableFilters.speed.min ? parseFloat(tableFilters.speed.min) : null
-      const maxSpeed = tableFilters.speed.max ? parseFloat(tableFilters.speed.max) : null
+    if (appliedFilters.speed.min || appliedFilters.speed.max) {
+      const minSpeed = appliedFilters.speed.min ? parseFloat(appliedFilters.speed.min) : null
+      const maxSpeed = appliedFilters.speed.max ? parseFloat(appliedFilters.speed.max) : null
       if (minSpeed !== null || maxSpeed !== null) {
         filters.push(point => {
           if (minSpeed !== null && maxSpeed !== null) {
@@ -691,9 +705,9 @@ function App() {
     }
 
     // 高度筛选（范围）
-    if (tableFilters.altitude.min || tableFilters.altitude.max) {
-      const minAltitude = tableFilters.altitude.min ? parseFloat(tableFilters.altitude.min) : null
-      const maxAltitude = tableFilters.altitude.max ? parseFloat(tableFilters.altitude.max) : null
+    if (appliedFilters.altitude.min || appliedFilters.altitude.max) {
+      const minAltitude = appliedFilters.altitude.min ? parseFloat(appliedFilters.altitude.min) : null
+      const maxAltitude = appliedFilters.altitude.max ? parseFloat(appliedFilters.altitude.max) : null
       if (minAltitude !== null || maxAltitude !== null) {
         filters.push(point => {
           if (minAltitude !== null && maxAltitude !== null) {
@@ -723,9 +737,9 @@ function App() {
     }
 
     return filtered
-  }, [dataPoints, tableFilters])
+  }, [dataPoints, appliedFilters])
 
-  // 检查是否有筛选条件
+  // 检查是否有筛选条件（输入条件）
   const hasFilters = useMemo(() => {
     return !!(
       tableFilters.timeRange ||
@@ -739,6 +753,21 @@ function App() {
       tableFilters.altitude.max
     )
   }, [tableFilters])
+
+  // 检查是否有已应用的筛选条件
+  const hasAppliedFilters = useMemo(() => {
+    return !!(
+      appliedFilters.timeRange ||
+      appliedFilters.longitude.min ||
+      appliedFilters.longitude.max ||
+      appliedFilters.latitude.min ||
+      appliedFilters.latitude.max ||
+      appliedFilters.speed.min ||
+      appliedFilters.speed.max ||
+      appliedFilters.altitude.min ||
+      appliedFilters.altitude.max
+    )
+  }, [appliedFilters])
 
   // 选中所有筛选后的点
   const handleSelectAllFiltered = useCallback(() => {
@@ -1337,9 +1366,9 @@ function App() {
                           defaultPickerValue={timeRange.defaultPicker ? [timeRange.defaultPicker, timeRange.defaultPicker] : undefined}
                           style={{ flex: 1, maxWidth: '400px' }}
                         />
-                        {tableFilters.timeRange && (
+                        {appliedFilters.timeRange && (
                           <span style={{ fontSize: '11px', color: '#1890ff', whiteSpace: 'nowrap' }}>
-                            (已选中 {selectedPoints.size} 个点)
+                            (已应用筛选)
                           </span>
                         )}
                       </div>
@@ -1452,17 +1481,34 @@ function App() {
                           </div>
                         </div>
 
-                        {/* 清除筛选按钮 - 在折叠内容中 */}
-                        <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '12px' }}>
+                        {/* 应用和清除筛选按钮 */}
+                        <div style={{ display: 'flex', justifyContent: 'space-between', gap: '8px', marginTop: '12px' }}>
+                          <Button
+                            type="primary"
+                            icon={<SearchOutlined />}
+                            onClick={handleApplyFilters}
+                            disabled={!hasFilters}
+                            size="small"
+                            style={{ flex: 1 }}
+                          >
+                            应用筛选
+                          </Button>
                           <Button
                             size="small"
-                            onClick={() => setTableFilters({
-                              timeRange: null,
-                              longitude: { min: '', max: '' },
-                              latitude: { min: '', max: '' },
-                              speed: { min: '', max: '' },
-                              altitude: { min: '', max: '' }
-                            })}
+                            onClick={() => {
+                              const emptyFilters = {
+                                timeRange: null,
+                                longitude: { min: '', max: '' },
+                                latitude: { min: '', max: '' },
+                                speed: { min: '', max: '' },
+                                altitude: { min: '', max: '' }
+                              }
+                              setTableFilters(emptyFilters)
+                              setAppliedFilters(emptyFilters)
+                              setSelectedPoints(new Set())
+                              message.success('已清除所有筛选条件')
+                            }}
+                            disabled={!hasFilters && !hasAppliedFilters}
                           >
                             清除筛选
                           </Button>
