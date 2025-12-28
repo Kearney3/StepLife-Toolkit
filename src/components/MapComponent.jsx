@@ -2,6 +2,9 @@ import React, { useEffect, useRef, useState, useImperativeHandle, forwardRef, us
 import { MapContainer, TileLayer, useMap, Rectangle } from 'react-leaflet'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
+import { Select, ColorPicker, Space } from 'antd'
+import { GlobalOutlined, BgColorsOutlined, RadiusSettingOutlined } from '@ant-design/icons'
+import { getDefaultProvider, mapProviders } from '../config/mapProviders'
 
 // 修复 Leaflet 默认图标问题
 delete L.Icon.Default.prototype._getIconUrl
@@ -341,6 +344,25 @@ function CanvasLayer({ dataPoints, selectedPoints, onPointClick, isSelecting, po
   )
 }
 
+// 动态地图图层组件
+function DynamicTileLayer({ mapProvider }) {
+  const map = useMap()
+  
+  useEffect(() => {
+    // 当切换地图提供商时，可能需要调整地图视图
+    // 不同坐标系的地图可能需要坐标转换，这里先保持简单实现
+  }, [mapProvider, map])
+  
+  return (
+    <TileLayer
+      attribution={mapProvider.attribution}
+      url={mapProvider.url}
+      maxZoom={mapProvider.maxZoom}
+      subdomains={mapProvider.subdomains}
+    />
+  )
+}
+
 // 地图更新组件
 function MapUpdater({ center, zoom }) {
   const map = useMap()
@@ -623,6 +645,243 @@ function ViewportBounds({ onBoundsChange }) {
   return null
 }
 
+// 地图提供商选择控件
+function MapProviderControl({ mapProviderId, onMapProviderChange, mapProvider }) {
+  const [isExpanded, setIsExpanded] = useState(false)
+  
+  return (
+    <div
+      style={{
+        position: 'absolute',
+        top: '10px',
+        right: '10px',
+        zIndex: 1000,
+        backgroundColor: 'white',
+        borderRadius: '4px',
+        boxShadow: '0 1px 5px rgba(0,0,0,0.4)',
+        padding: isExpanded ? '8px' : '4px 8px',
+        minWidth: isExpanded ? '220px' : '160px',
+        fontSize: '12px',
+        transition: 'all 0.2s ease'
+      }}
+      className="leaflet-control leaflet-bar"
+      onMouseEnter={() => setIsExpanded(true)}
+      onMouseLeave={() => setIsExpanded(false)}
+    >
+      <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+        <GlobalOutlined style={{ fontSize: '14px', color: '#666', flexShrink: 0 }} />
+        <Select
+          value={mapProviderId}
+          onChange={onMapProviderChange}
+          size="small"
+          style={{ flex: 1, fontSize: '12px' }}
+          bordered={false}
+          showSearch
+          filterOption={(input, option) =>
+            (option?.label ?? '').toLowerCase().includes(input.toLowerCase())
+          }
+          options={mapProviders.map(provider => ({
+            label: provider.name,
+            value: provider.id
+          }))}
+          dropdownStyle={{ fontSize: '12px' }}
+          placeholder="选择地图"
+        />
+      </div>
+      {isExpanded && (
+        <>
+          {mapProvider.note && (
+            <div style={{ 
+              fontSize: '10px', 
+              color: '#ff4d4f', 
+              marginTop: '6px',
+              padding: '4px 6px',
+              backgroundColor: '#fff1f0',
+              borderRadius: '2px',
+              lineHeight: '1.4'
+            }}>
+              ⚠️ {mapProvider.note}
+            </div>
+          )}
+          <div style={{ 
+            fontSize: '10px', 
+            color: '#8c8c8c', 
+            marginTop: '4px',
+            padding: '2px 4px',
+            lineHeight: '1.4'
+          }}>
+            坐标系: <strong>{mapProvider.coordinateSystem}</strong>
+          </div>
+        </>
+      )}
+    </div>
+  )
+}
+
+// 样式配置控件
+function StyleConfigControl({ 
+  pointColor, 
+  selectedColor, 
+  pointSize, 
+  onPointColorChange, 
+  onPointSizeChange,
+  presetColors,
+  colorMode,
+  customColor,
+  onColorModeChange,
+  onCustomColorChange,
+  getContrastColor
+}) {
+  const [isExpanded, setIsExpanded] = useState(false)
+  
+  return (
+    <div
+      style={{
+        position: 'absolute',
+        top: '80px', // 放在地图提供商控件下方，稍微增加间距
+        right: '10px',
+        zIndex: 1000,
+        backgroundColor: 'white',
+        borderRadius: '4px',
+        boxShadow: '0 1px 5px rgba(0,0,0,0.4)',
+        padding: isExpanded ? '12px' : '6px 10px',
+        minWidth: isExpanded ? '240px' : 'auto',
+        fontSize: '13px',
+        transition: 'all 0.2s ease'
+      }}
+      className="leaflet-control leaflet-bar"
+      onMouseEnter={() => setIsExpanded(true)}
+      onMouseLeave={() => setIsExpanded(false)}
+    >
+      <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+        <BgColorsOutlined style={{ fontSize: '16px', color: '#666', flexShrink: 0 }} />
+        {isExpanded ? (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', width: '100%' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <span style={{ fontSize: '13px', color: '#666', whiteSpace: 'nowrap', fontWeight: 500 }}>颜色:</span>
+              {colorMode === 'preset' ? (
+                <Select
+                  value={presetColors.find(p => p.color === pointColor) ? pointColor : 'custom'}
+                  onChange={(value) => {
+                    if (value === 'custom') {
+                      onColorModeChange('custom')
+                      onPointColorChange(customColor)
+                    } else {
+                      const preset = presetColors.find(p => p.color === value)
+                      if (preset) {
+                        onPointColorChange(preset.color)
+                        if (getContrastColor) {
+                          // 选中颜色会通过 onPointColorChange 的回调自动更新
+                        }
+                      }
+                    }
+                  }}
+                  size="small"
+                  style={{ flex: 1, fontSize: '13px' }}
+                  bordered={false}
+                  options={presetColors.map(preset => ({
+                    label: (
+                      <Space>
+                        {preset.color && (
+                          <span
+                            style={{
+                              display: 'inline-block',
+                              width: 12,
+                              height: 12,
+                              backgroundColor: preset.color,
+                              borderRadius: '50%',
+                              border: '1px solid #d9d9d9'
+                            }}
+                          />
+                        )}
+                        {preset.name}
+                      </Space>
+                    ),
+                    value: preset.color || 'custom'
+                  }))}
+                  dropdownStyle={{ fontSize: '13px' }}
+                />
+              ) : (
+                <ColorPicker
+                  value={pointColor}
+                  onChange={(color) => {
+                    const hexColor = color.toHexString()
+                    onPointColorChange(hexColor)
+                    onCustomColorChange(hexColor)
+                  }}
+                  size="small"
+                  showText
+                  format="hex"
+                />
+              )}
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <RadiusSettingOutlined style={{ fontSize: '14px', color: '#666', flexShrink: 0 }} />
+              <span style={{ fontSize: '13px', color: '#666', whiteSpace: 'nowrap', fontWeight: 500 }}>大小:</span>
+              <Select
+                value={pointSize}
+                onChange={onPointSizeChange}
+                size="small"
+                style={{ flex: 1, fontSize: '13px' }}
+                bordered={false}
+                options={[
+                  { label: '1', value: '1' },
+                  { label: '2', value: '2' },
+                  { label: '3', value: '3' },
+                  { label: '4', value: '4' },
+                  { label: '5', value: '5' }
+                ]}
+                dropdownStyle={{ fontSize: '13px' }}
+              />
+            </div>
+            <div style={{ 
+              fontSize: '11px', 
+              color: '#8c8c8c', 
+              marginTop: '4px',
+              padding: '4px 6px',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px'
+            }}>
+              <span style={{ 
+                display: 'inline-block',
+                width: 10,
+                height: 10,
+                backgroundColor: pointColor,
+                borderRadius: '50%',
+                border: '1px solid #d9d9d9'
+              }} />
+              <span>普通</span>
+              <span style={{ 
+                display: 'inline-block',
+                width: 10,
+                height: 10,
+                backgroundColor: selectedColor,
+                borderRadius: '50%',
+                border: '1px solid #d9d9d9',
+                marginLeft: '10px'
+              }} />
+              <span>选中</span>
+            </div>
+          </div>
+        ) : (
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <span style={{ 
+              display: 'inline-block',
+              width: 14,
+              height: 14,
+              backgroundColor: pointColor,
+              borderRadius: '50%',
+              border: '1px solid #d9d9d9'
+            }} />
+            <span style={{ fontSize: '13px', color: '#666', fontWeight: 500 }}>{pointSize}</span>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
 const MapComponent = forwardRef(({ 
   dataPoints, 
   selectedPoints, 
@@ -632,7 +891,18 @@ const MapComponent = forwardRef(({
   onBoxSelect,
   pointColor = '#1890ff',
   selectedColor = '#ff4d4f',
-  pointSize = 'medium'
+  pointSize = 'medium',
+  mapProvider = getDefaultProvider(),
+  mapProviderId,
+  onMapProviderChange,
+  onPointColorChange,
+  onPointSizeChange,
+  presetColors = [],
+  colorMode = 'preset',
+  customColor = '#1890ff',
+  onColorModeChange,
+  onCustomColorChange,
+  getContrastColor
 }, ref) => {
   const [center, setCenter] = useState([39.9, 116.3])
   const [zoom, setZoom] = useState(13)
@@ -669,39 +939,60 @@ const MapComponent = forwardRef(({
   }))
 
   return (
-    <MapContainer
-      center={center}
-      zoom={zoom}
-      style={{ height: '100%', width: '100%' }}
-      zoomControl={true}
-    >
-      <TileLayer
-        attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-        url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-      />
-      <MapUpdater center={center} zoom={zoom} />
-      <ViewportBounds onBoundsChange={setBounds} />
-      {bounds && (
-        <>
-          <CanvasLayer
-            dataPoints={dataPoints}
-            selectedPoints={selectedPoints}
-            onPointClick={onPointSelect}
-            isSelecting={isSelecting}
-            pointColor={pointColor}
-            selectedColor={selectedColor}
-            pointSize={pointSize}
-          />
-          <BoxSelector 
-            isSelecting={isSelecting}
-            isBoxSelectMode={isBoxSelectMode}
-            onBoxSelect={onBoxSelect}
-            dataPoints={dataPoints}
-            bounds={bounds}
-          />
-        </>
+    <div style={{ position: 'relative', height: '100%', width: '100%' }}>
+      <MapContainer
+        center={center}
+        zoom={zoom}
+        style={{ height: '100%', width: '100%' }}
+        zoomControl={true}
+      >
+        <DynamicTileLayer mapProvider={mapProvider} />
+        <MapUpdater center={center} zoom={zoom} />
+        <ViewportBounds onBoundsChange={setBounds} />
+        {bounds && (
+          <>
+            <CanvasLayer
+              dataPoints={dataPoints}
+              selectedPoints={selectedPoints}
+              onPointClick={onPointSelect}
+              isSelecting={isSelecting}
+              pointColor={pointColor}
+              selectedColor={selectedColor}
+              pointSize={pointSize}
+            />
+            <BoxSelector 
+              isSelecting={isSelecting}
+              isBoxSelectMode={isBoxSelectMode}
+              onBoxSelect={onBoxSelect}
+              dataPoints={dataPoints}
+              bounds={bounds}
+            />
+          </>
+        )}
+      </MapContainer>
+      {mapProviderId && onMapProviderChange && (
+        <MapProviderControl
+          mapProviderId={mapProviderId}
+          onMapProviderChange={onMapProviderChange}
+          mapProvider={mapProvider}
+        />
       )}
-    </MapContainer>
+      {onPointColorChange && onPointSizeChange && (
+        <StyleConfigControl
+          pointColor={pointColor}
+          selectedColor={selectedColor}
+          pointSize={pointSize}
+          onPointColorChange={onPointColorChange}
+          onPointSizeChange={onPointSizeChange}
+          presetColors={presetColors}
+          colorMode={colorMode}
+          customColor={customColor}
+          onColorModeChange={onColorModeChange}
+          onCustomColorChange={onCustomColorChange}
+          getContrastColor={getContrastColor}
+        />
+      )}
+    </div>
   )
 })
 

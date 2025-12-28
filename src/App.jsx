@@ -4,6 +4,7 @@ import { UploadOutlined, DeleteOutlined, DownloadOutlined, ClearOutlined, UpOutl
 import Papa from 'papaparse'
 import dayjs from 'dayjs'
 import MapComponent from './components/MapComponent'
+import { getDefaultProvider, getProviderById } from './config/mapProviders'
 import './App.css'
 
 const { Header, Content } = Layout
@@ -109,6 +110,9 @@ function getContrastColor(mainColor) {
   return contrastMap[mainColor] || '#1890ff' // 默认返回蓝色
 }
 
+// 导出给 MapComponent 使用
+window.getContrastColor = getContrastColor
+
 // 预设颜色样式
 const PRESET_COLORS = [
   { name: '蓝色', color: '#1890ff', selectedColor: '#fa8c16' },
@@ -137,6 +141,10 @@ function App() {
   const [colorMode, setColorMode] = useState('preset')
   const [customColor, setCustomColor] = useState('#1890ff')
   const [pointSize, setPointSize] = useState('3') // 1-5: extra-small, small, medium, large, extra-large
+  const [mapProviderId, setMapProviderId] = useState(() => {
+    const saved = localStorage.getItem('steplife-map-provider')
+    return saved || getDefaultProvider().id
+  })
   const [tableFilters, setTableFilters] = useState({
     timeRange: null,
     longitude: { min: '', max: '' },
@@ -155,7 +163,6 @@ function App() {
   const [pageSize, setPageSize] = useState(30)
   const [filtersCollapsed, setFiltersCollapsed] = useState(true)
   const [overviewCollapsed, setOverviewCollapsed] = useState(true)
-  const [styleConfigCollapsed, setStyleConfigCollapsed] = useState(false)
   const [isCompact, setIsCompact] = useState(false)
   const [isVeryCompact, setIsVeryCompact] = useState(false)
   const mapRef = useRef(null)
@@ -178,6 +185,16 @@ function App() {
   useEffect(() => {
     localStorage.setItem('steplife-split-ratio', splitRatio.toString())
   }, [splitRatio])
+
+  // 保存地图提供商到localStorage
+  useEffect(() => {
+    localStorage.setItem('steplife-map-provider', mapProviderId)
+  }, [mapProviderId])
+
+  // 获取当前地图提供商
+  const currentMapProvider = useMemo(() => {
+    return getProviderById(mapProviderId)
+  }, [mapProviderId])
 
   // 处理分隔线调整
   const handleSplitResize = useCallback((newRatio) => {
@@ -958,6 +975,26 @@ function App() {
               pointColor={pointColor}
               selectedColor={selectedColor}
               pointSize={pointSize}
+              mapProvider={currentMapProvider}
+              mapProviderId={mapProviderId}
+              onMapProviderChange={setMapProviderId}
+              onPointColorChange={(color) => {
+                setPointColor(color)
+                // 检查是否是预设颜色
+                const preset = PRESET_COLORS.find(p => p.color === color)
+                if (preset) {
+                  setSelectedColor(preset.selectedColor)
+                } else {
+                  setSelectedColor(getContrastColor(color))
+                }
+              }}
+              onPointSizeChange={setPointSize}
+              presetColors={PRESET_COLORS}
+              colorMode={colorMode}
+              customColor={customColor}
+              onColorModeChange={setColorMode}
+              onCustomColorChange={setCustomColor}
+              getContrastColor={getContrastColor}
             />
           </div>
 
@@ -1147,123 +1184,6 @@ function App() {
                       >
                         删除选中 ({selectedPoints.size.toLocaleString()})
                       </Button>
-                    </div>
-                  </div>
-                </Card>
-
-                {/* 样式配置卡片 */}
-                <Card
-                  size="small"
-                  title={
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                      <span>样式配置</span>
-                      <Button
-                        type="text"
-                        size="small"
-                        icon={styleConfigCollapsed ? <DownOutlined /> : <UpOutlined />}
-                        onClick={() => setStyleConfigCollapsed(!styleConfigCollapsed)}
-                        style={{ fontSize: '11px', color: '#8c8c8c' }}
-                      />
-                    </div>
-                  }
-                  headStyle={{
-                    fontSize: '12px',
-                    fontWeight: 500,
-                    color: '#595959',
-                    padding: '8px 12px',
-                    minHeight: 'auto'
-                  }}
-                  bodyStyle={{
-                    padding: styleConfigCollapsed ? '0px' : '12px'
-                  }}
-                >
-                  <div
-                    style={{
-                      overflow: 'hidden',
-                      transform: styleConfigCollapsed ? 'scaleY(0)' : 'scaleY(1)',
-                      transformOrigin: 'top',
-                      transition: 'transform 0.25s cubic-bezier(0.4, 0.0, 0.2, 1), opacity 0.2s ease-out',
-                      opacity: styleConfigCollapsed ? 0 : 1,
-                      height: styleConfigCollapsed ? '0px' : 'auto'
-                    }}
-                  >
-                    <div style={{ 
-                      display: 'grid', 
-                      gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))',
-                      alignItems: 'center', 
-                      gap: '8px 12px' 
-                    }}>
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', minWidth: 0 }}>
-                        <span style={{ fontSize: '12px', whiteSpace: 'nowrap' }}>颜色</span>
-                        {colorMode === 'preset' ? (
-                          <Select
-                            value={pointColor}
-                            onChange={(value) => {
-                              if (value === 'custom') {
-                                setColorMode('custom')
-                                setPointColor(customColor)
-                                setSelectedColor(getContrastColor(customColor))
-                              } else {
-                                const preset = PRESET_COLORS.find(p => p.color === value) || PRESET_COLORS[0]
-                                setPointColor(preset.color)
-                                setSelectedColor(preset.selectedColor)
-                              }
-                            }}
-                            size="small"
-                            style={{ width: '100%' }}
-                          >
-                            {PRESET_COLORS.map(preset => (
-                              <Option
-                                key={preset.color || 'custom'}
-                                value={preset.color || 'custom'}
-                              >
-                                <Space>
-                                  {preset.color && (
-                                    <span
-                                      style={{
-                                        display: 'inline-block',
-                                        width: 12,
-                                        height: 12,
-                                        backgroundColor: preset.color,
-                                        borderRadius: '50%',
-                                        border: '1px solid #d9d9d9'
-                                      }}
-                                    />
-                                  )}
-                                  {preset.name}
-                                </Space>
-                              </Option>
-                            ))}
-                          </Select>
-                        ) : (
-                          <ColorPicker
-                            value={pointColor}
-                            onChange={(color) => {
-                              const hexColor = color.toHexString()
-                              setPointColor(hexColor)
-                              setCustomColor(hexColor)
-                              setSelectedColor(getContrastColor(hexColor))
-                            }}
-                            size="small"
-                            showText
-                          />
-                        )}
-                      </div>
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', minWidth: 0 }}>
-                        <span style={{ fontSize: '12px', whiteSpace: 'nowrap' }}>大小</span>
-                        <Select
-                          value={pointSize}
-                          onChange={setPointSize}
-                          size="small"
-                          style={{ width: '100%' }}
-                        >
-                          <Option value="1">1</Option>
-                          <Option value="2">2</Option>
-                          <Option value="3">3</Option>
-                          <Option value="4">4</Option>
-                          <Option value="5">5</Option>
-                        </Select>
-                      </div>
                     </div>
                   </div>
                 </Card>
