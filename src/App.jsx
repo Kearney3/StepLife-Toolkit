@@ -1,6 +1,6 @@
-import React, { useState, useRef, useCallback, useMemo } from 'react'
+import React, { useState, useRef, useCallback, useMemo, useEffect } from 'react'
 import { Layout, Upload, Button, Space, DatePicker, message, Card, Typography, Divider, Select, ColorPicker, Table, Input } from 'antd'
-import { UploadOutlined, DeleteOutlined, DownloadOutlined, ClearOutlined } from '@ant-design/icons'
+import { UploadOutlined, DeleteOutlined, DownloadOutlined, ClearOutlined, UpOutlined, DownOutlined, SelectOutlined, CheckCircleOutlined, CloseCircleOutlined, DeleteRowOutlined } from '@ant-design/icons'
 import Papa from 'papaparse'
 import dayjs from 'dayjs'
 import MapComponent from './components/MapComponent'
@@ -10,6 +10,88 @@ const { Header, Content } = Layout
 const { Title } = Typography
 const { RangePicker } = DatePicker
 const { Option } = Select
+
+// 可拖拽分隔线组件
+function Splitter({ onResize, minLeft = 200, minRight = 300 }) {
+  const [isDragging, setIsDragging] = useState(false)
+  const splitterRef = useRef(null)
+
+  const handleMouseDown = (e) => {
+    e.preventDefault()
+    setIsDragging(true)
+  }
+
+  useEffect(() => {
+    if (!isDragging) return
+
+    const handleMouseMove = (e) => {
+      const container = splitterRef.current?.parentElement
+      if (!container) return
+
+      const containerRect = container.getBoundingClientRect()
+      const containerWidth = containerRect.width
+      const mouseX = e.clientX - containerRect.left
+
+      // 计算左侧宽度比例
+      let leftRatio = (mouseX / containerWidth) * 100
+
+      // 限制最小宽度
+      const minLeftPx = (minLeft / containerWidth) * 100
+      const minRightPx = (minRight / containerWidth) * 100
+
+      leftRatio = Math.max(minLeftPx, Math.min(100 - minRightPx, leftRatio))
+
+      onResize(leftRatio)
+    }
+
+    const handleMouseUp = () => {
+      setIsDragging(false)
+    }
+
+    document.addEventListener('mousemove', handleMouseMove)
+    document.addEventListener('mouseup', handleMouseUp)
+
+    return () => {
+      document.removeEventListener('mousemove', handleMouseMove)
+      document.removeEventListener('mouseup', handleMouseUp)
+    }
+  }, [isDragging, onResize, minLeft, minRight])
+
+  return (
+    <div
+      ref={splitterRef}
+      style={{
+        width: '6px',
+        height: '100%',
+        background: isDragging ? '#1890ff' : '#d9d9d9',
+        cursor: 'col-resize',
+        transition: isDragging ? 'none' : 'background-color 0.2s',
+        position: 'relative',
+        flexShrink: 0,
+        userSelect: 'none'
+      }}
+      onMouseDown={handleMouseDown}
+      onMouseEnter={() => splitterRef.current.style.backgroundColor = '#1890ff'}
+      onMouseLeave={() => {
+        if (!isDragging) splitterRef.current.style.backgroundColor = '#d9d9d9'
+      }}
+    >
+      {/* 分隔线装饰 */}
+      <div
+        style={{
+          position: 'absolute',
+          left: '50%',
+          top: '50%',
+          transform: 'translate(-50%, -50%)',
+          width: '2px',
+          height: '20px',
+          backgroundColor: '#fff',
+          borderRadius: '1px'
+        }}
+      />
+    </div>
+  )
+}
 
 // 预设颜色样式
 const PRESET_COLORS = [
@@ -24,6 +106,12 @@ const PRESET_COLORS = [
 ]
 
 function App() {
+  // 从localStorage加载分隔比例，默认70
+  const [splitRatio, setSplitRatio] = useState(() => {
+    const saved = localStorage.getItem('steplife-split-ratio')
+    return saved ? parseFloat(saved) : 70
+  })
+
   const [dataPoints, setDataPoints] = useState([])
   const [selectedPoints, setSelectedPoints] = useState(new Set())
   const [isSelecting, setIsSelecting] = useState(false)
@@ -41,7 +129,18 @@ function App() {
     altitude: { min: '', max: '' }
   })
   const [pageSize, setPageSize] = useState(30)
+  const [filtersCollapsed, setFiltersCollapsed] = useState(false)
   const mapRef = useRef(null)
+
+  // 保存分隔比例到localStorage
+  useEffect(() => {
+    localStorage.setItem('steplife-split-ratio', splitRatio.toString())
+  }, [splitRatio])
+
+  // 处理分隔线调整
+  const handleSplitResize = useCallback((newRatio) => {
+    setSplitRatio(Math.round(newRatio))
+  }, [])
 
   // 解析 CSV 文件
   const handleFileUpload = (file) => {
@@ -544,8 +643,8 @@ function App() {
       </Header>
       <Content className="app-content">
         <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
-          {/* 左侧地图区域 - 2/3 */}
-          <div className="map-container" style={{ flex: '0 0 70%' }}>
+          {/* 左侧地图区域 */}
+          <div className="map-container" style={{ flex: `0 0 ${splitRatio}%`, minWidth: '200px' }}>
             <MapComponent
               ref={mapRef}
               dataPoints={dataPoints}
@@ -559,15 +658,30 @@ function App() {
               pointSize={pointSize}
             />
           </div>
-          
-          {/* 右侧配置和表格区域 - 1/3 */}
-          <div style={{ flex: '0 0 30%', display: 'flex', flexDirection: 'column', borderLeft: '1px solid #d9d9d9', overflow: 'hidden', background: '#f0f2f5' }}>
+
+          {/* 可拖拽分隔线 */}
+          <Splitter onResize={handleSplitResize} minLeft={200} minRight={300} />
+
+          {/* 右侧配置和表格区域 */}
+          <div style={{ flex: `0 0 ${100 - splitRatio}%`, minWidth: '300px', display: 'flex', flexDirection: 'column', borderLeft: '1px solid #d9d9d9', overflow: 'hidden', background: '#f0f2f5' }}>
             {/* 配置区域 */}
             <div style={{ padding: '12px', background: '#fff', borderBottom: '1px solid #d9d9d9', overflowY: 'auto', flex: '0 0 auto' }}>
-              <Space direction="vertical" style={{ width: '100%' }} size="small">
-                {/* 文件操作区域 */}
-                <div>
-                  <div style={{ fontSize: '12px', fontWeight: 500, color: '#595959', marginBottom: '8px' }}>文件操作</div>
+              <Space direction="vertical" style={{ width: '100%' }} size="middle">
+                {/* 文件操作卡片 */}
+                <Card
+                  size="small"
+                  title="文件操作"
+                  headStyle={{
+                    fontSize: '12px',
+                    fontWeight: 500,
+                    color: '#595959',
+                    padding: '8px 12px',
+                    minHeight: 'auto'
+                  }}
+                  bodyStyle={{
+                    padding: '12px'
+                  }}
+                >
                   <Space wrap>
                     <Upload
                       accept=".csv"
@@ -580,7 +694,7 @@ function App() {
                         导入 CSV
                       </Button>
                     </Upload>
-                    <Button 
+                    <Button
                       icon={<DownloadOutlined />}
                       onClick={handleExport}
                       disabled={dataPoints.length === 0}
@@ -588,8 +702,8 @@ function App() {
                     >
                       导出
                     </Button>
-                    <Button 
-                      danger 
+                    <Button
+                      danger
                       icon={<ClearOutlined />}
                       onClick={handleClearAll}
                       disabled={dataPoints.length === 0}
@@ -598,66 +712,125 @@ function App() {
                       清空
                     </Button>
                   </Space>
-                </div>
+                </Card>
 
-                <Divider style={{ margin: '8px 0' }} />
+                {/* 选择操作卡片 */}
+                <Card
+                  size="small"
+                  title="选择操作"
+                  headStyle={{
+                    fontSize: '12px',
+                    fontWeight: 500,
+                    color: '#595959',
+                    padding: '8px 12px',
+                    minHeight: 'auto'
+                  }}
+                  bodyStyle={{
+                    padding: '12px'
+                  }}
+                >
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                    {/* 模式切换区域 */}
+                    <div style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '8px',
+                      padding: '8px',
+                      backgroundColor: '#fafafa',
+                      borderRadius: '6px',
+                      border: '1px solid #f0f0f0'
+                    }}>
+                      <Button
+                        type={isSelecting ? "primary" : "default"}
+                        icon={<SelectOutlined />}
+                        onClick={handleToggleSelectMode}
+                        size="small"
+                        style={{ flex: 1 }}
+                      >
+                        {isSelecting ? '退出选择' : '进入选择'}
+                      </Button>
 
-                {/* 选择操作区域 */}
-                <div>
-                  <div style={{ fontSize: '12px', fontWeight: 500, color: '#595959', marginBottom: '8px' }}>选择操作</div>
-                  <Space wrap>
-                    <Button 
-                      type={isSelecting ? "primary" : "default"}
-                      onClick={handleToggleSelectMode}
-                      size="small"
-                    >
-                      {isSelecting ? '退出选择' : '选择模式'}
-                    </Button>
-                    {isSelecting && (
-                      <>
-                        <Button 
-                          type={isBoxSelectMode ? "primary" : "default"}
-                          onClick={() => setIsBoxSelectMode(!isBoxSelectMode)}
-                          size="small"
-                        >
-                          {isBoxSelectMode ? '退出框选' : '框选模式'}
-                        </Button>
-                        {!isBoxSelectMode && (
-                          <span style={{ color: '#1890ff', fontSize: '11px' }}>
-                            Shift+拖拽框选
+                      {isSelecting && (
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flex: 1 }}>
+                          <Button
+                            type={isBoxSelectMode ? "primary" : "default"}
+                            onClick={() => setIsBoxSelectMode(!isBoxSelectMode)}
+                            size="small"
+                            style={{ flex: 1 }}
+                          >
+                            {isBoxSelectMode ? '退出框选' : '框选模式'}
+                          </Button>
+                          <span style={{
+                            fontSize: '11px',
+                            color: '#8c8c8c',
+                            whiteSpace: 'nowrap',
+                            minWidth: '80px'
+                          }}>
+                            {isBoxSelectMode ? '直接拖拽' : 'Shift+拖拽'}
                           </span>
-                        )}
-                        {isBoxSelectMode && (
-                          <span style={{ color: '#1890ff', fontSize: '11px' }}>
-                            直接拖拽框选
-                          </span>
-                        )}
-                      </>
-                    )}
-                    <Button 
-                      onClick={handleClearSelection}
-                      disabled={selectedPoints.size === 0}
-                      size="small"
-                    >
-                      取消选择
-                    </Button>
-                    <Button 
-                      danger 
-                      icon={<DeleteOutlined />}
-                      onClick={handleDeleteSelected}
-                      disabled={selectedPoints.size === 0}
-                      size="small"
-                    >
-                      删除选中 ({selectedPoints.size})
-                    </Button>
-                  </Space>
-                </div>
+                        </div>
+                      )}
+                    </div>
 
-                <Divider style={{ margin: '8px 0' }} />
+                    {/* 操作按钮区域 */}
+                    <div style={{
+                      display: 'grid',
+                      gridTemplateColumns: '1fr 1fr',
+                      gap: '6px'
+                    }}>
+                      <Button
+                        type="primary"
+                        icon={<CheckCircleOutlined />}
+                        onClick={handleSelectAllFiltered}
+                        disabled={filteredDataPoints.length === 0}
+                        size="small"
+                        style={{ width: '100%' }}
+                      >
+                        全选 ({filteredDataPoints.length})
+                      </Button>
 
-                {/* 样式配置区域 */}
-                <div>
-                  <div style={{ fontSize: '12px', fontWeight: 500, color: '#595959', marginBottom: '8px' }}>样式配置</div>
+                      <Button
+                        icon={<CloseCircleOutlined />}
+                        onClick={handleClearSelection}
+                        disabled={selectedPoints.size === 0}
+                        size="small"
+                        style={{ width: '100%' }}
+                      >
+                        取消 ({selectedPoints.size})
+                      </Button>
+
+                      <Button
+                        danger
+                        icon={<DeleteRowOutlined />}
+                        onClick={handleDeleteSelected}
+                        disabled={selectedPoints.size === 0}
+                        size="small"
+                        style={{
+                          width: '100%',
+                          gridColumn: '1 / -1' // 跨两列
+                        }}
+                      >
+                        删除选中 ({selectedPoints.size})
+                      </Button>
+                    </div>
+                  </div>
+                </Card>
+
+                {/* 样式配置卡片 */}
+                <Card
+                  size="small"
+                  title="样式配置"
+                  headStyle={{
+                    fontSize: '12px',
+                    fontWeight: 500,
+                    color: '#595959',
+                    padding: '8px 12px',
+                    minHeight: 'auto'
+                  }}
+                  bodyStyle={{
+                    padding: '12px'
+                  }}
+                >
                   <div style={{ display: 'grid', gridTemplateColumns: 'auto 1fr auto 1fr', alignItems: 'center', gap: '8px 12px' }}>
                     <span style={{ fontSize: '12px' }}>颜色</span>
                     {colorMode === 'preset' ? (
@@ -677,8 +850,8 @@ function App() {
                         style={{ width: '100%' }}
                       >
                         {PRESET_COLORS.map(preset => (
-                          <Option 
-                            key={preset.color || 'custom'} 
+                          <Option
+                            key={preset.color || 'custom'}
                             value={preset.color || 'custom'}
                           >
                             <Space>
@@ -724,25 +897,32 @@ function App() {
                       <Option value="5">5</Option>
                     </Select>
                   </div>
-                </div>
+                </Card>
 
-                <Divider style={{ margin: '8px 0' }} />
-
-                {/* 数据统计 */}
-                <div style={{ 
-                  padding: '8px 12px', 
-                  background: '#f5f5f5', 
-                  borderRadius: '4px',
-                  fontSize: '11px',
-                  color: '#595959'
-                }}>
+                {/* 数据统计卡片 */}
+                <Card
+                  size="small"
+                  title="数据统计"
+                  headStyle={{
+                    fontSize: '12px',
+                    fontWeight: 500,
+                    color: '#595959',
+                    padding: '8px 12px',
+                    minHeight: 'auto'
+                  }}
+                  bodyStyle={{
+                    padding: '12px',
+                    fontSize: '11px',
+                    color: '#595959'
+                  }}
+                >
                   <div>共 <strong style={{ color: '#262626' }}>{dataPoints.length.toLocaleString()}</strong> 个坐标点</div>
                   {selectedPoints.size > 0 && (
                     <div style={{ marginTop: '4px' }}>
                       已选择 <strong style={{ color: '#1890ff' }}>{selectedPoints.size.toLocaleString()}</strong> 个
                     </div>
                   )}
-                </div>
+                </Card>
               </Space>
             </div>
             
@@ -754,172 +934,205 @@ function App() {
                   bodyStyle={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column', padding: '12px' }}
                 >
                   <Space direction="vertical" style={{ width: '100%', marginBottom: '12px' }} size="middle">
-                    {/* 时间范围筛选 */}
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-                      <span style={{ fontSize: '12px', fontWeight: 500, minWidth: '60px' }}>时间范围：</span>
-                      <RangePicker
-                        size="small"
-                        showTime
-                        format="YYYY-MM-DD HH:mm:ss"
-                        value={tableFilters.timeRange}
-                        onChange={handleTimeRangeSelect}
-                        placeholder={['开始', '结束']}
-                        disabledDate={disabledDate}
-                        disabledTime={disabledTime}
-                        defaultPickerValue={timeRange.defaultPicker ? [timeRange.defaultPicker, timeRange.defaultPicker] : undefined}
-                        style={{ flex: 1, maxWidth: '400px' }}
-                      />
-                      {timeRange.min && timeRange.max && (
-                        <span style={{ 
-                          fontSize: '11px', 
-                          color: '#595959', 
-                          backgroundColor: '#f5f5f5',
-                          padding: '2px 8px',
+                    {/* 数据筛选器卡片 */}
+                    <Card
+                      size="small"
+                      title={
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                          <span>数据筛选器</span>
+                          <Button
+                            type="text"
+                            size="small"
+                            icon={filtersCollapsed ? <DownOutlined /> : <UpOutlined />}
+                            onClick={() => setFiltersCollapsed(!filtersCollapsed)}
+                            style={{ fontSize: '11px', color: '#8c8c8c' }}
+                          />
+                        </div>
+                      }
+                      headStyle={{
+                        fontSize: '12px',
+                        fontWeight: 500,
+                        color: '#595959',
+                        padding: '8px 12px',
+                        minHeight: 'auto'
+                      }}
+                      bodyStyle={{
+                        padding: filtersCollapsed ? '0px' : '12px'
+                      }}
+                    >
+                      {/* 时间范围筛选 */}
+                      <div
+                        style={{
+                          overflow: 'hidden',
+                          maxHeight: filtersCollapsed ? '0px' : '500px',
+                          transition: 'max-height 0.3s ease-in-out',
+                          opacity: filtersCollapsed ? 0 : 1,
+                          transitionProperty: 'max-height, opacity',
+                          transitionDuration: '0.3s, 0.2s',
+                          transitionTimingFunction: 'ease-in-out, ease-in-out',
+                          transitionDelay: filtersCollapsed ? '0s, 0s' : '0s, 0.1s'
+                        }}
+                      >
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap', marginTop: '12px' }}>
+                        <span style={{ fontSize: '12px', fontWeight: 500, minWidth: '60px' }}>时间范围：</span>
+                        <RangePicker
+                          size="small"
+                          showTime
+                          format="YYYY-MM-DD HH:mm:ss"
+                          value={tableFilters.timeRange}
+                          onChange={handleTimeRangeSelect}
+                          placeholder={['开始', '结束']}
+                          disabledDate={disabledDate}
+                          disabledTime={disabledTime}
+                          defaultPickerValue={timeRange.defaultPicker ? [timeRange.defaultPicker, timeRange.defaultPicker] : undefined}
+                          style={{ flex: 1, maxWidth: '400px' }}
+                        />
+                        {timeRange.min && timeRange.max && (
+                          <span style={{
+                            fontSize: '11px',
+                            color: '#595959',
+                            backgroundColor: '#f5f5f5',
+                            padding: '2px 8px',
+                            borderRadius: '4px',
+                            fontFamily: 'monospace',
+                            whiteSpace: 'nowrap'
+                          }}>
+                            {dayjs(timeRange.min).format('YYYY-MM-DD HH:mm')} ～ {dayjs(timeRange.max).format('YYYY-MM-DD HH:mm')}
+                          </span>
+                        )}
+                        {tableFilters.timeRange && (
+                          <span style={{ fontSize: '11px', color: '#1890ff', whiteSpace: 'nowrap' }}>
+                            (已选中 {selectedPoints.size} 个点)
+                          </span>
+                        )}
+                      </div>
+
+                        {/* 数值范围筛选 */}
+                        <div style={{
+                          display: 'grid',
+                          gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
+                          gap: '8px',
+                          padding: '8px',
+                          backgroundColor: '#fafafa',
                           borderRadius: '4px',
-                          fontFamily: 'monospace',
-                          whiteSpace: 'nowrap'
+                          border: '1px solid #f0f0f0'
                         }}>
-                          {dayjs(timeRange.min).format('YYYY-MM-DD HH:mm')} ～ {dayjs(timeRange.max).format('YYYY-MM-DD HH:mm')}
-                        </span>
-                      )}
-                      {tableFilters.timeRange && (
-                        <span style={{ fontSize: '11px', color: '#1890ff', whiteSpace: 'nowrap' }}>
-                          (已选中 {selectedPoints.size} 个点)
-                        </span>
-                      )}
-                    </div>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flex: 1 }}>
+                            <span style={{ fontSize: '12px', fontWeight: 500, minWidth: '50px', flexShrink: 0 }}>经度：</span>
+                            <Input
+                              size="small"
+                              style={{ flex: 1 }}
+                              placeholder="最小"
+                              value={tableFilters.longitude.min}
+                              onChange={(e) => setTableFilters(prev => ({
+                                ...prev,
+                                longitude: { ...prev.longitude, min: e.target.value }
+                              }))}
+                            />
+                            <span style={{ fontSize: '11px', color: '#8c8c8c', margin: '0 2px', flexShrink: 0 }}>~</span>
+                            <Input
+                              size="small"
+                              style={{ flex: 1 }}
+                              placeholder="最大"
+                              value={tableFilters.longitude.max}
+                              onChange={(e) => setTableFilters(prev => ({
+                                ...prev,
+                                longitude: { ...prev.longitude, max: e.target.value }
+                              }))}
+                            />
+                          </div>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flex: 1 }}>
+                            <span style={{ fontSize: '12px', fontWeight: 500, minWidth: '50px', flexShrink: 0 }}>纬度：</span>
+                            <Input
+                              size="small"
+                              style={{ flex: 1 }}
+                              placeholder="最小"
+                              value={tableFilters.latitude.min}
+                              onChange={(e) => setTableFilters(prev => ({
+                                ...prev,
+                                latitude: { ...prev.latitude, min: e.target.value }
+                              }))}
+                            />
+                            <span style={{ fontSize: '11px', color: '#8c8c8c', margin: '0 2px', flexShrink: 0 }}>~</span>
+                            <Input
+                              size="small"
+                              style={{ flex: 1 }}
+                              placeholder="最大"
+                              value={tableFilters.latitude.max}
+                              onChange={(e) => setTableFilters(prev => ({
+                                ...prev,
+                                latitude: { ...prev.latitude, max: e.target.value }
+                              }))}
+                            />
+                          </div>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flex: 1 }}>
+                            <span style={{ fontSize: '12px', fontWeight: 500, minWidth: '50px', flexShrink: 0 }}>速度：</span>
+                            <Input
+                              size="small"
+                              style={{ flex: 1 }}
+                              placeholder="最小"
+                              value={tableFilters.speed.min}
+                              onChange={(e) => setTableFilters(prev => ({
+                                ...prev,
+                                speed: { ...prev.speed, min: e.target.value }
+                              }))}
+                            />
+                            <span style={{ fontSize: '11px', color: '#8c8c8c', margin: '0 2px', flexShrink: 0 }}>~</span>
+                            <Input
+                              size="small"
+                              style={{ flex: 1 }}
+                              placeholder="最大"
+                              value={tableFilters.speed.max}
+                              onChange={(e) => setTableFilters(prev => ({
+                                ...prev,
+                                speed: { ...prev.speed, max: e.target.value }
+                              }))}
+                            />
+                          </div>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flex: 1 }}>
+                            <span style={{ fontSize: '12px', fontWeight: 500, minWidth: '50px', flexShrink: 0 }}>高度：</span>
+                            <Input
+                              size="small"
+                              style={{ flex: 1 }}
+                              placeholder="最小"
+                              value={tableFilters.altitude.min}
+                              onChange={(e) => setTableFilters(prev => ({
+                                ...prev,
+                                altitude: { ...prev.altitude, min: e.target.value }
+                              }))}
+                            />
+                            <span style={{ fontSize: '11px', color: '#8c8c8c', margin: '0 2px', flexShrink: 0 }}>~</span>
+                            <Input
+                              size="small"
+                              style={{ flex: 1 }}
+                              placeholder="最大"
+                              value={tableFilters.altitude.max}
+                              onChange={(e) => setTableFilters(prev => ({
+                                ...prev,
+                                altitude: { ...prev.altitude, max: e.target.value }
+                              }))}
+                            />
+                          </div>
+                        </div>
 
-                    {/* 数值范围筛选 */}
-                    <div style={{ 
-                      display: 'grid', 
-                      gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', 
-                      gap: '8px',
-                      padding: '8px',
-                      backgroundColor: '#fafafa',
-                      borderRadius: '4px',
-                      border: '1px solid #f0f0f0'
-                    }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flex: 1 }}>
-                        <span style={{ fontSize: '12px', fontWeight: 500, minWidth: '50px', flexShrink: 0 }}>经度：</span>
-                        <Input
-                          size="small"
-                          style={{ flex: 1 }}
-                          placeholder="最小"
-                          value={tableFilters.longitude.min}
-                          onChange={(e) => setTableFilters(prev => ({ 
-                            ...prev, 
-                            longitude: { ...prev.longitude, min: e.target.value }
-                          }))}
-                        />
-                        <span style={{ fontSize: '11px', color: '#8c8c8c', margin: '0 2px', flexShrink: 0 }}>~</span>
-                        <Input
-                          size="small"
-                          style={{ flex: 1 }}
-                          placeholder="最大"
-                          value={tableFilters.longitude.max}
-                          onChange={(e) => setTableFilters(prev => ({ 
-                            ...prev, 
-                            longitude: { ...prev.longitude, max: e.target.value }
-                          }))}
-                        />
+                        {/* 清除筛选按钮 - 在折叠内容中 */}
+                        <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '12px' }}>
+                          <Button
+                            size="small"
+                            onClick={() => setTableFilters({
+                              timeRange: null,
+                              longitude: { min: '', max: '' },
+                              latitude: { min: '', max: '' },
+                              speed: { min: '', max: '' },
+                              altitude: { min: '', max: '' }
+                            })}
+                          >
+                            清除筛选
+                          </Button>
+                        </div>
                       </div>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flex: 1 }}>
-                        <span style={{ fontSize: '12px', fontWeight: 500, minWidth: '50px', flexShrink: 0 }}>纬度：</span>
-                        <Input
-                          size="small"
-                          style={{ flex: 1 }}
-                          placeholder="最小"
-                          value={tableFilters.latitude.min}
-                          onChange={(e) => setTableFilters(prev => ({ 
-                            ...prev, 
-                            latitude: { ...prev.latitude, min: e.target.value }
-                          }))}
-                        />
-                        <span style={{ fontSize: '11px', color: '#8c8c8c', margin: '0 2px', flexShrink: 0 }}>~</span>
-                        <Input
-                          size="small"
-                          style={{ flex: 1 }}
-                          placeholder="最大"
-                          value={tableFilters.latitude.max}
-                          onChange={(e) => setTableFilters(prev => ({ 
-                            ...prev, 
-                            latitude: { ...prev.latitude, max: e.target.value }
-                          }))}
-                        />
-                      </div>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flex: 1 }}>
-                        <span style={{ fontSize: '12px', fontWeight: 500, minWidth: '50px', flexShrink: 0 }}>速度：</span>
-                        <Input
-                          size="small"
-                          style={{ flex: 1 }}
-                          placeholder="最小"
-                          value={tableFilters.speed.min}
-                          onChange={(e) => setTableFilters(prev => ({ 
-                            ...prev, 
-                            speed: { ...prev.speed, min: e.target.value }
-                          }))}
-                        />
-                        <span style={{ fontSize: '11px', color: '#8c8c8c', margin: '0 2px', flexShrink: 0 }}>~</span>
-                        <Input
-                          size="small"
-                          style={{ flex: 1 }}
-                          placeholder="最大"
-                          value={tableFilters.speed.max}
-                          onChange={(e) => setTableFilters(prev => ({ 
-                            ...prev, 
-                            speed: { ...prev.speed, max: e.target.value }
-                          }))}
-                        />
-                      </div>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flex: 1 }}>
-                        <span style={{ fontSize: '12px', fontWeight: 500, minWidth: '50px', flexShrink: 0 }}>高度：</span>
-                        <Input
-                          size="small"
-                          style={{ flex: 1 }}
-                          placeholder="最小"
-                          value={tableFilters.altitude.min}
-                          onChange={(e) => setTableFilters(prev => ({ 
-                            ...prev, 
-                            altitude: { ...prev.altitude, min: e.target.value }
-                          }))}
-                        />
-                        <span style={{ fontSize: '11px', color: '#8c8c8c', margin: '0 2px', flexShrink: 0 }}>~</span>
-                        <Input
-                          size="small"
-                          style={{ flex: 1 }}
-                          placeholder="最大"
-                          value={tableFilters.altitude.max}
-                          onChange={(e) => setTableFilters(prev => ({ 
-                            ...prev, 
-                            altitude: { ...prev.altitude, max: e.target.value }
-                          }))}
-                        />
-                      </div>
-                    </div>
+                    </Card>
 
-                    {/* 操作按钮 */}
-                    <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
-                      <Button
-                        size="small"
-                        type="primary"
-                        onClick={handleSelectAllFiltered}
-                        disabled={filteredDataPoints.length === 0}
-                      >
-                        选中全部 ({filteredDataPoints.length})
-                      </Button>
-                      <Button
-                        size="small"
-                        onClick={() => setTableFilters({
-                          timeRange: null,
-                          longitude: { min: '', max: '' },
-                          latitude: { min: '', max: '' },
-                          speed: { min: '', max: '' },
-                          altitude: { min: '', max: '' }
-                        })}
-                      >
-                        清除筛选
-                      </Button>
-                    </div>
                   </Space>
                   <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', minHeight: 0 }}>
                     <div style={{ flex: 1, overflow: 'auto', minHeight: 0 }}>
