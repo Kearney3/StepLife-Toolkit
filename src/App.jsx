@@ -1638,6 +1638,7 @@ function App() {
                         }}
                         scroll={{
                           x: 1200,
+                          y: 400,
                           scrollToFirstRowOnChange: true
                         }}
                         rowSelection={{
