@@ -1,0 +1,273 @@
+name: Deploy to Multiple Platforms
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build-github-pages:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '24'
+        cache: 'npm'
+
+    - name: Install dependencies
+      run: npm ci
+
+    - name: Build application for GitHub Pages
+      run: npm run build
+      env:
+        GITHUB_PAGES: true
+
+
+
+    - name: Create .nojekyll file
+      run: touch dist/.nojekyll
+
+    - name: Upload build artifacts for GitHub Pages
+      uses: actions/upload-artifact@v4
+      with:
+        name: dist-github-pages
+        path: dist/
+
+  build-other-platforms:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '24'
+        cache: 'npm'
+
+    - name: Install dependencies
+      run: npm ci
+
+    - name: Build application for other platforms
+      run: npm run build
+
+    - name: Upload build artifacts for other platforms
+      uses: actions/upload-artifact@v4
+      with:
+        name: dist-other-platforms
+        path: dist/
+
+  build-vercel:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup Node.js for Vercel
+      uses: actions/setup-node@v4
+      with:
+        node-version: '22'
+        cache: 'npm'
+
+    - name: Install dependencies
+      run: npm ci
+
+    - name: Build application for Vercel
+      run: npm run build
+
+    - name: Upload build artifacts for Vercel
+      uses: actions/upload-artifact@v4
+      with:
+        name: dist-vercel
+        path: dist/
+
+  # 部署到GitHub Pages
+  deploy-github-pages:
+    needs: build-github-pages
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+
+    steps:
+    - name: Download build artifacts for GitHub Pages
+      uses: actions/download-artifact@v4
+      with:
+        name: dist-github-pages
+        path: dist/
+
+
+
+    - name: Setup Pages
+      uses: actions/configure-pages@v4
+      with:
+        enablement: true
+
+    - name: Upload to GitHub Pages
+      uses: actions/upload-pages-artifact@v3
+      with:
+        path: dist/
+        retention-days: 1
+
+    - name: Deploy to GitHub Pages
+      id: deployment
+      uses: actions/deploy-pages@v4
+      timeout-minutes: 10
+
+  # 部署到Vercel
+  deploy-vercel:
+    needs: build-vercel
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+
+    steps:
+    - name: Check Vercel secrets
+      run: |
+        echo "🔍 检查Vercel配置..."
+
+        # 检查必要的secrets是否配置
+        if [ -z "${{ secrets.VERCEL_TOKEN }}" ]; then
+          echo "❌ VERCEL_TOKEN 未配置"
+          echo "请按照 VERCEL_SETUP.md 配置Vercel Token"
+          exit 1
+        fi
+
+        if [ -z "${{ secrets.VERCEL_ORG_ID }}" ]; then
+          echo "❌ VERCEL_ORG_ID 未配置"
+          echo "请按照 VERCEL_SETUP.md 配置Vercel Org ID"
+          exit 1
+        fi
+
+        if [ -z "${{ secrets.VERCEL_PROJECT_ID }}" ]; then
+          echo "❌ VERCEL_PROJECT_ID 未配置"
+          echo "请按照 VERCEL_SETUP.md 配置Vercel Project ID"
+          exit 1
+        fi
+
+        echo "✅ Vercel secrets 配置正确"
+        echo "🚀 开始部署到Vercel..."
+
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup Node.js for Vercel
+      uses: actions/setup-node@v4
+      with:
+        node-version: '22'
+        cache: 'npm'
+
+    - name: Configure for Vercel
+      run: |
+        # 临时修改 package.json 以适配 Vercel 的 Node.js 版本要求
+        cp package.json package.json.backup
+        sed -i 's/"node": ">=24.0.0"/"node": "22.x"/' package.json || true
+        echo "✅ 已配置为 Vercel 兼容的 Node.js 版本"
+
+    - name: Install dependencies
+      run: npm ci
+
+    - name: Build for Vercel
+      run: npm run build
+
+    - name: Deploy to Vercel
+      id: deploy
+      uses: amondnet/vercel-action@v25
+      with:
+        vercel-token: ${{ secrets.VERCEL_TOKEN }}
+        vercel-org-id: ${{ secrets.VERCEL_ORG_ID }}
+        vercel-project-id: ${{ secrets.VERCEL_PROJECT_ID }}
+        vercel-args: '--prod'
+
+    - name: Restore package.json
+      run: |
+        # 恢复原始的 package.json
+        mv package.json.backup package.json
+        echo "✅ 已恢复原始的 package.json 配置"
+
+    - name: Comment deployment URL
+      uses: actions/github-script@v7
+      if: github.event_name == 'pull_request'
+      with:
+        script: |
+          github.rest.issues.createComment({
+            issue_number: context.issue.number,
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            body: `🚀 **Vercel部署成功!**\n\n预览链接: ${{ steps.deploy.outputs.preview-url }}`
+          })
+
+  # 部署到Netlify
+  deploy-netlify:
+    needs: build-other-platforms
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+
+    steps:
+    - name: Check Netlify secrets
+      run: |
+        echo "🔍 检查Netlify配置..."
+
+        # 检查必要的secrets是否配置
+        if [ -z "${{ secrets.NETLIFY_AUTH_TOKEN }}" ]; then
+          echo "❌ NETLIFY_AUTH_TOKEN 未配置"
+          echo "请按照下面的说明配置Netlify Auth Token"
+          exit 1
+        fi
+
+        if [ -z "${{ secrets.NETLIFY_SITE_ID }}" ]; then
+          echo "❌ NETLIFY_SITE_ID 未配置"
+          echo "请按照下面的说明配置Netlify Site ID"
+          exit 1
+        fi
+
+        echo "✅ Netlify secrets 配置正确"
+        echo "🚀 开始部署到Netlify..."
+
+    - name: Download build artifacts for Netlify
+      uses: actions/download-artifact@v4
+      with:
+        name: dist-other-platforms
+        path: dist/
+
+    - name: Deploy to Netlify
+      id: deploy
+      uses: nwtgck/actions-netlify@v2.0
+      with:
+        publish-dir: './dist'
+        production-branch: main
+        github-token: ${{ secrets.GITHUB_TOKEN }}
+        deploy-message: "Deploy from GitHub Actions"
+        enable-pull-request-comment: true
+        enable-commit-comment: true
+        overwrites-pull-request-comment: true
+      env:
+        NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
+        NETLIFY_SITE_ID: ${{ secrets.NETLIFY_SITE_ID }}
+      timeout-minutes: 1
+
+    - name: Comment deployment URL
+      uses: actions/github-script@v7
+      if: github.event_name == 'pull_request'
+      with:
+        script: |
+          github.rest.issues.createComment({
+            issue_number: context.issue.number,
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            body: `🚀 **Netlify部署成功!**\n\n预览链接: ${{ steps.deploy.outputs.url }}`
+          })
