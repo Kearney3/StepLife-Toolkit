@@ -1,7 +1,7 @@
 <div align="center">
   <h1 style="margin: 0; font-size: 2.5rem; font-weight: bold;">一生足迹工具箱</h1>
   <p>
-    <img src="https://img.shields.io/badge/version-1.0.0-blue?style=flat" alt="Version" />
+    <img src="https://img.shields.io/badge/version-1.1.0-blue?style=flat" alt="Version" />
     <img src="https://img.shields.io/badge/React-19.2.3-61DAFB?logo=react&logoColor=white&style=flat" alt="React" />
     <img src="https://img.shields.io/badge/Vite-5.0.8-646CFF?logo=vite&logoColor=white&style=flat" alt="Vite" />
     <img src="https://img.shields.io/badge/Ant%20Design-6.1.2-0170FE?logo=ant-design&logoColor=white&style=flat" alt="Ant Design" />
