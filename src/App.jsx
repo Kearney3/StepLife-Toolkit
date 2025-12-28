@@ -1,6 +1,6 @@
 import React, { useState, useRef, useCallback, useMemo, useEffect } from 'react'
 import { Layout, Upload, Button, Space, DatePicker, message, Card, Typography, Divider, Select, ColorPicker, Table, Input } from 'antd'
-import { UploadOutlined, DeleteOutlined, DownloadOutlined, ClearOutlined, UpOutlined, DownOutlined, SelectOutlined, CheckCircleOutlined, CloseCircleOutlined, DeleteRowOutlined } from '@ant-design/icons'
+import { UploadOutlined, DeleteOutlined, DownloadOutlined, ClearOutlined, UpOutlined, DownOutlined, SelectOutlined, CheckCircleOutlined, CloseCircleOutlined, DeleteRowOutlined, DatabaseOutlined, CheckSquareOutlined, ClockCircleOutlined } from '@ant-design/icons'
 import Papa from 'papaparse'
 import dayjs from 'dayjs'
 import MapComponent from './components/MapComponent'
@@ -130,6 +130,7 @@ function App() {
   })
   const [pageSize, setPageSize] = useState(30)
   const [filtersCollapsed, setFiltersCollapsed] = useState(false)
+  const [overviewCollapsed, setOverviewCollapsed] = useState(false)
   const mapRef = useRef(null)
 
   // 保存分隔比例到localStorage
@@ -345,23 +346,87 @@ function App() {
     message.success('已删除坐标点')
   }, [])
 
-  // 计算数据的时间范围
+  // 计算数据的时间范围和统计信息
   const timeRange = useMemo(() => {
     if (dataPoints.length === 0) {
-      return { min: null, max: null, defaultPicker: null }
+      return {
+        min: null,
+        max: null,
+        defaultPicker: null,
+        duration: null,
+        durationText: null,
+        pointCount: 0,
+        avgInterval: null,
+        avgIntervalText: null,
+        days: 0
+      }
     }
     const times = dataPoints.map(p => p.dataTime).filter(t => t > 0)
     if (times.length === 0) {
-      return { min: null, max: null, defaultPicker: null }
+      return {
+        min: null,
+        max: null,
+        defaultPicker: null,
+        duration: null,
+        durationText: null,
+        pointCount: 0,
+        avgInterval: null,
+        avgIntervalText: null,
+        days: 0
+      }
     }
     const minTime = Math.min(...times)
     const maxTime = Math.max(...times)
+    const minDayjs = dayjs.unix(minTime)
+    const maxDayjs = dayjs.unix(maxTime)
+
+    // 计算时长
+    const duration = maxTime - minTime
+    const hours = Math.floor(duration / 3600)
+    const minutes = Math.floor((duration % 3600) / 60)
+    const seconds = duration % 60
+    let durationText = ''
+    if (hours > 0) durationText += `${hours}时`
+    if (minutes > 0) durationText += `${minutes}分`
+    if (seconds > 0 || durationText === '') durationText += `${seconds}秒`
+
+    // 计算天数
+    const days = maxDayjs.diff(minDayjs, 'day') + 1
+
+    // 计算平均时间间隔
+    const sortedTimes = times.sort((a, b) => a - b)
+    let totalInterval = 0
+    let intervalCount = 0
+    for (let i = 1; i < sortedTimes.length; i++) {
+      const interval = sortedTimes[i] - sortedTimes[i - 1]
+      if (interval > 0 && interval < 3600) { // 只计算1小时内的间隔
+        totalInterval += interval
+        intervalCount++
+      }
+    }
+    const avgInterval = intervalCount > 0 ? totalInterval / intervalCount : null
+    let avgIntervalText = ''
+    if (avgInterval) {
+      if (avgInterval >= 60) {
+        avgIntervalText = `${Math.round(avgInterval / 60)}分`
+      } else {
+        avgIntervalText = `${Math.round(avgInterval)}秒`
+      }
+    }
+
     // 计算默认显示的时间（时间范围的中间值）
     const defaultTime = Math.floor((minTime + maxTime) / 2)
+
     return {
-      min: dayjs.unix(minTime),
-      max: dayjs.unix(maxTime),
-      defaultPicker: dayjs.unix(defaultTime)
+      min: minDayjs,
+      max: maxDayjs,
+      defaultPicker: dayjs.unix(defaultTime),
+      duration,
+      durationText,
+      pointCount: times.length,
+      avgInterval,
+      avgIntervalText,
+      days
     }
   }, [dataPoints])
 
@@ -618,7 +683,7 @@ function App() {
     {
       title: '操作',
       key: 'action',
-      width: 80,
+      width: 40,
       fixed: 'right',
       render: (_, record) => (
         <Button
@@ -627,9 +692,8 @@ function App() {
           size="small"
           icon={<DeleteOutlined />}
           onClick={() => handleDeleteFromTable(record.id)}
-        >
-          删除
-        </Button>
+          title="删除此行"
+        />
       )
     }
   ]
@@ -899,10 +963,21 @@ function App() {
                   </div>
                 </Card>
 
-                {/* 数据统计卡片 */}
+                {/* 数据概览卡片 */}
                 <Card
                   size="small"
-                  title="数据统计"
+                  title={
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                      <span>数据概览</span>
+                      <Button
+                        type="text"
+                        size="small"
+                        icon={overviewCollapsed ? <DownOutlined /> : <UpOutlined />}
+                        onClick={() => setOverviewCollapsed(!overviewCollapsed)}
+                        style={{ fontSize: '11px', color: '#8c8c8c' }}
+                      />
+                    </div>
+                  }
                   headStyle={{
                     fontSize: '12px',
                     fontWeight: 500,
@@ -911,18 +986,131 @@ function App() {
                     minHeight: 'auto'
                   }}
                   bodyStyle={{
-                    padding: '12px',
-                    fontSize: '11px',
-                    color: '#595959'
+                    padding: overviewCollapsed ? '0px' : '12px'
                   }}
                 >
-                  <div>共 <strong style={{ color: '#262626' }}>{dataPoints.length.toLocaleString()}</strong> 个坐标点</div>
-                  {selectedPoints.size > 0 && (
-                    <div style={{ marginTop: '4px' }}>
-                      已选择 <strong style={{ color: '#1890ff' }}>{selectedPoints.size.toLocaleString()}</strong> 个
+                  <div
+                    style={{
+                      overflow: 'hidden',
+                      transform: overviewCollapsed ? 'scaleY(0)' : 'scaleY(1)',
+                      transformOrigin: 'top',
+                      transition: 'transform 0.25s cubic-bezier(0.4, 0.0, 0.2, 1), opacity 0.2s ease-out',
+                      opacity: overviewCollapsed ? 0 : 1,
+                      height: overviewCollapsed ? '0px' : 'auto'
+                    }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '12px' }}>
+                      <DatabaseOutlined style={{
+                        color: '#1890ff',
+                        fontSize: '20px'
+                      }} />
+                      <div style={{ flex: 1 }}>
+                        <div style={{
+                          fontSize: '18px',
+                          fontWeight: 700,
+                          color: '#1890ff'
+                        }}>
+                          {dataPoints.length.toLocaleString()} 个坐标点
+                        </div>
+                      </div>
                     </div>
-                  )}
+
+                    {/* 时间范围信息 */}
+                    {timeRange.min && timeRange.max && (
+                      <div style={{
+                        padding: '8px',
+                        backgroundColor: '#f6ffed',
+                        borderRadius: '6px',
+                        border: '1px solid #d9f7be'
+                      }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '6px' }}>
+                          <ClockCircleOutlined style={{
+                            color: '#52c41a',
+                            fontSize: '14px'
+                          }} />
+                          <div style={{
+                            fontSize: '11px',
+                            fontWeight: 500,
+                            color: '#52c41a',
+                            fontFamily: 'monospace'
+                          }}>
+                            {timeRange.min.format('YYYY-MM-DD HH:mm')} ~ {timeRange.max.format('YYYY-MM-DD HH:mm')}
+                          </div>
+                        </div>
+
+                        {/* 统计指标 */}
+                        <div style={{
+                          display: 'grid',
+                          gridTemplateColumns: 'repeat(auto-fit, minmax(70px, 1fr))',
+                          gap: '6px',
+                          fontSize: '9px',
+                          color: '#666'
+                        }}>
+                          <div style={{ textAlign: 'center' }}>
+                            <div style={{ fontSize: '11px', fontWeight: 600, color: '#52c41a' }}>
+                              {timeRange.days}天
+                            </div>
+                            <div>跨度</div>
+                          </div>
+                          <div style={{ textAlign: 'center' }}>
+                            <div style={{ fontSize: '11px', fontWeight: 600, color: '#52c41a' }}>
+                              {timeRange.durationText}
+                            </div>
+                            <div>时长</div>
+                          </div>
+                          <div style={{ textAlign: 'center' }}>
+                            <div style={{ fontSize: '11px', fontWeight: 600, color: '#52c41a' }}>
+                              {timeRange.avgIntervalText || '--'}
+                            </div>
+                            <div>间隔</div>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
                 </Card>
+
+                {/* 数据统计卡片 */}
+                {selectedPoints.size > 0 && (
+                  <Card
+                    size="small"
+                    title="选择统计"
+                    headStyle={{
+                      fontSize: '12px',
+                      fontWeight: 500,
+                      color: '#595959',
+                      padding: '8px 12px',
+                      minHeight: 'auto'
+                    }}
+                    bodyStyle={{
+                      padding: '12px'
+                    }}
+                  >
+                    <div style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '8px',
+                      padding: '8px',
+                      backgroundColor: '#fff7e6',
+                      borderRadius: '6px',
+                      border: '1px solid #ffe7ba'
+                    }}>
+                      <CheckSquareOutlined style={{
+                        color: '#fa8c16',
+                        fontSize: '16px'
+                      }} />
+                      <div style={{ flex: 1 }}>
+                        <div style={{
+                          fontSize: '14px',
+                          fontWeight: 600,
+                          color: '#fa8c16'
+                        }}>
+                          {selectedPoints.size.toLocaleString()} 个已选择
+                        </div>
+                      </div>
+                    </div>
+                  </Card>
+                )}
               </Space>
             </div>
             
@@ -964,17 +1152,15 @@ function App() {
                       <div
                         style={{
                           overflow: 'hidden',
-                          maxHeight: filtersCollapsed ? '0px' : '500px',
-                          transition: 'max-height 0.3s ease-in-out',
+                          transform: filtersCollapsed ? 'scaleY(0)' : 'scaleY(1)',
+                          transformOrigin: 'top',
+                          transition: 'transform 0.25s cubic-bezier(0.4, 0.0, 0.2, 1), opacity 0.2s ease-out',
                           opacity: filtersCollapsed ? 0 : 1,
-                          transitionProperty: 'max-height, opacity',
-                          transitionDuration: '0.3s, 0.2s',
-                          transitionTimingFunction: 'ease-in-out, ease-in-out',
-                          transitionDelay: filtersCollapsed ? '0s, 0s' : '0s, 0.1s'
+                          height: filtersCollapsed ? '0px' : 'auto'
                         }}
                       >
                       <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap', marginTop: '12px' }}>
-                        <span style={{ fontSize: '12px', fontWeight: 500, minWidth: '60px' }}>时间范围：</span>
+                        <span style={{ fontSize: '12px', fontWeight: 500, minWidth: '60px' }}>时间筛选：</span>
                         <RangePicker
                           size="small"
                           showTime
@@ -987,19 +1173,6 @@ function App() {
                           defaultPickerValue={timeRange.defaultPicker ? [timeRange.defaultPicker, timeRange.defaultPicker] : undefined}
                           style={{ flex: 1, maxWidth: '400px' }}
                         />
-                        {timeRange.min && timeRange.max && (
-                          <span style={{
-                            fontSize: '11px',
-                            color: '#595959',
-                            backgroundColor: '#f5f5f5',
-                            padding: '2px 8px',
-                            borderRadius: '4px',
-                            fontFamily: 'monospace',
-                            whiteSpace: 'nowrap'
-                          }}>
-                            {dayjs(timeRange.min).format('YYYY-MM-DD HH:mm')} ～ {dayjs(timeRange.max).format('YYYY-MM-DD HH:mm')}
-                          </span>
-                        )}
                         {tableFilters.timeRange && (
                           <span style={{ fontSize: '11px', color: '#1890ff', whiteSpace: 'nowrap' }}>
                             (已选中 {selectedPoints.size} 个点)
@@ -1152,7 +1325,8 @@ function App() {
                             setPageSize(size)
                           }
                         }}
-                        scroll={{ 
+                        scroll={{
+                          x: 1200,
                           scrollToFirstRowOnChange: true
                         }}
                         rowSelection={{
@@ -1162,7 +1336,8 @@ function App() {
                           },
                           getCheckboxProps: () => ({
                             disabled: !isSelecting
-                          })
+                          }),
+                          fixed: 'left'
                         }}
                       />
                     </div>
