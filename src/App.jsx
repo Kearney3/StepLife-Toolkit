@@ -1,6 +1,6 @@
 import React, { useState, useRef, useCallback, useMemo, useEffect } from 'react'
-import { Layout, Upload, Button, Space, DatePicker, message, Card, Typography, Divider, Select, ColorPicker, Table, Input } from 'antd'
-import { UploadOutlined, DeleteOutlined, DownloadOutlined, ClearOutlined, UpOutlined, DownOutlined, SelectOutlined, CheckCircleOutlined, CloseCircleOutlined, DeleteRowOutlined, DatabaseOutlined, CheckSquareOutlined, ClockCircleOutlined } from '@ant-design/icons'
+import { Layout, Upload, Button, Space, DatePicker, message, Card, Typography, Select, ColorPicker, Table, Input } from 'antd'
+import { UploadOutlined, DeleteOutlined, DownloadOutlined, ClearOutlined, UpOutlined, DownOutlined, SelectOutlined, CheckCircleOutlined, CloseCircleOutlined, DeleteRowOutlined, DatabaseOutlined, ClockCircleOutlined, SwapOutlined } from '@ant-design/icons'
 import Papa from 'papaparse'
 import dayjs from 'dayjs'
 import MapComponent from './components/MapComponent'
@@ -148,6 +148,8 @@ function App() {
   const [filtersCollapsed, setFiltersCollapsed] = useState(false)
   const [overviewCollapsed, setOverviewCollapsed] = useState(false)
   const mapRef = useRef(null)
+  const processedFilesRef = useRef(new Set())
+  const performanceWarningShownRef = useRef(false)
 
   // 保存分隔比例到localStorage
   useEffect(() => {
@@ -159,6 +161,25 @@ function App() {
     setSplitRatio(Math.round(newRatio))
   }, [])
 
+  // 性能监控和提示
+  useEffect(() => {
+    if (dataPoints.length > 100000 && !performanceWarningShownRef.current) {
+      message.info(
+        `已导入 ${dataPoints.length.toLocaleString()} 个坐标点。系统已启用高性能模式，支持最多100万个点的显示。`,
+        8
+      )
+      performanceWarningShownRef.current = true
+    } else if (dataPoints.length > 50000 && dataPoints.length <= 100000 && !performanceWarningShownRef.current) {
+      message.info(
+        `已导入 ${dataPoints.length.toLocaleString()} 个坐标点。系统已启用性能优化模式。`,
+        6
+      )
+      performanceWarningShownRef.current = true
+    } else if (dataPoints.length <= 50000) {
+      performanceWarningShownRef.current = false
+    }
+  }, [dataPoints.length])
+
   // 解析 CSV 文件
   const handleFileUpload = (file) => {
     return new Promise((resolve, reject) => {
@@ -166,12 +187,25 @@ function App() {
         header: true,
         skipEmptyLines: true,
         complete: (results) => {
-          const points = results.data
-            .filter(row => row.longitude && row.latitude)
-            .map((row, index) => ({
+          // 优化：使用更高效的方式处理数据，移除 originalRow 以减少内存占用
+          const points = []
+          let minTime = Infinity
+          let maxTime = -Infinity
+          
+          for (let index = 0; index < results.data.length; index++) {
+            const row = results.data[index]
+            if (!row.longitude || !row.latitude) continue
+            
+            const dataTime = parseInt(row.dataTime) || 0
+            if (dataTime > 0) {
+              if (dataTime < minTime) minTime = dataTime
+              if (dataTime > maxTime) maxTime = dataTime
+            }
+            
+            points.push({
               id: `${file.name}-${Date.now()}-${index}`,
               fileName: file.name,
-              dataTime: parseInt(row.dataTime) || 0,
+              dataTime,
               locType: parseInt(row.locType) || 0,
               longitude: parseFloat(row.longitude),
               latitude: parseFloat(row.latitude),
@@ -181,31 +215,46 @@ function App() {
               distance: parseFloat(row.distance) || 0,
               isBackForeground: parseInt(row.isBackForeground) || 0,
               stepType: parseInt(row.stepType) || 0,
-              altitude: parseFloat(row.altitude) || 0,
-              originalRow: row
-            }))
+              altitude: parseFloat(row.altitude) || 0
+            })
+          }
           
           if (points.length > 0) {
-            // 计算导入数据的时间范围
-            const times = points.map(p => p.dataTime).filter(t => t > 0)
-            if (times.length > 0) {
-              const minTime = Math.min(...times)
-              const maxTime = Math.max(...times)
+            // 显示导入信息
+            if (minTime !== Infinity && maxTime !== Infinity) {
               const startDate = dayjs.unix(minTime).format('YYYY-MM-DD HH:mm:ss')
               const endDate = dayjs.unix(maxTime).format('YYYY-MM-DD HH:mm:ss')
               message.success(
-                `成功导入 ${points.length} 个坐标点\n时间范围：${startDate} 至 ${endDate}`,
+                `成功导入 ${points.length.toLocaleString()} 个坐标点\n时间范围：${startDate} 至 ${endDate}`,
                 5
               )
             } else {
-              message.success(`成功导入 ${points.length} 个坐标点`)
+              message.success(`成功导入 ${points.length.toLocaleString()} 个坐标点`)
             }
+
+            // 优化：根据数据量动态调整批处理大小
+            const batchSize = points.length > 100000 ? 20000 : points.length > 50000 ? 10000 : 5000
+            const updateStateInBatches = async () => {
+              for (let i = 0; i < points.length; i += batchSize) {
+                const batch = points.slice(i, i + batchSize)
+                setDataPoints(prev => [...prev, ...batch])
+
+                // 每处理完一批后短暂让出控制权，避免阻塞UI
+                if (i + batchSize < points.length) {
+                  await new Promise(resolve => setTimeout(resolve, 0))
+                }
+              }
+            }
+
+            updateStateInBatches().then(() => {
+              resolve(points)
+            }).catch(error => {
+              reject(error)
+            })
           } else {
             message.warning('文件中没有有效的坐标点')
+            resolve([])
           }
-          
-          setDataPoints(prev => [...prev, ...points])
-          resolve(points)
         },
         error: (error) => {
           message.error('文件解析失败: ' + error.message)
@@ -218,7 +267,11 @@ function App() {
   // 处理文件上传
   const handleUpload = async ({ fileList }) => {
     for (const file of fileList) {
-      await handleFileUpload(file.originFileObj)
+      // 检查文件是否已经处理过，避免重复处理
+      if (!processedFilesRef.current.has(file.uid)) {
+        processedFilesRef.current.add(file.uid)
+        await handleFileUpload(file.originFileObj)
+      }
     }
   }
 
@@ -244,7 +297,7 @@ function App() {
     message.success('已取消选择')
   }
 
-  // 处理时间范围选择，自动选中该时间段内的所有坐标点
+  // 处理时间范围选择，自动选中该时间段内的所有坐标点 - 优化版本
   const handleTimeRangeSelect = useCallback((dates) => {
     if (!dates || dates.length !== 2) {
       setTableFilters(prev => ({ ...prev, timeRange: null }))
@@ -256,22 +309,28 @@ function App() {
     const startTime = start.unix()
     const endTime = end.unix()
 
-    // 选中该时间段内的所有坐标点
-    const pointsInRange = dataPoints.filter(point => 
-      point.dataTime >= startTime && point.dataTime <= endTime
-    )
+    // 优化：使用单次遍历选中该时间段内的所有坐标点
+    const pointIds = new Set()
+    let count = 0
+    
+    for (let i = 0; i < dataPoints.length; i++) {
+      const point = dataPoints[i]
+      if (point.dataTime >= startTime && point.dataTime <= endTime) {
+        pointIds.add(point.id)
+        count++
+      }
+    }
 
-    if (pointsInRange.length === 0) {
+    if (count === 0) {
       message.warning('该时间段内没有坐标点')
       setTableFilters(prev => ({ ...prev, timeRange: dates }))
       setSelectedPoints(new Set())
       return
     }
 
-    const pointIds = new Set(pointsInRange.map(p => p.id))
     setSelectedPoints(pointIds)
     setTableFilters(prev => ({ ...prev, timeRange: dates }))
-    message.success(`已选中 ${pointsInRange.length} 个坐标点`)
+    message.success(`已选中 ${count.toLocaleString()} 个坐标点`)
   }, [dataPoints])
 
   // 导出 CSV
@@ -362,7 +421,7 @@ function App() {
     message.success('已删除坐标点')
   }, [])
 
-  // 计算数据的时间范围和统计信息
+  // 计算数据的时间范围和统计信息 - 优化版本，支持大数据量
   const timeRange = useMemo(() => {
     if (dataPoints.length === 0) {
       return {
@@ -377,8 +436,26 @@ function App() {
         days: 0
       }
     }
-    const times = dataPoints.map(p => p.dataTime).filter(t => t > 0)
-    if (times.length === 0) {
+    
+    // 优化：对于大数据量，使用采样计算统计信息
+    const sampleSize = dataPoints.length > 100000 ? 10000 : dataPoints.length > 50000 ? 5000 : dataPoints.length
+    const sampleStep = Math.max(1, Math.floor(dataPoints.length / sampleSize))
+    
+    let minTime = Infinity
+    let maxTime = -Infinity
+    let validTimeCount = 0
+    
+    // 遍历数据，同时计算最小最大值（单次遍历）
+    for (let i = 0; i < dataPoints.length; i += sampleStep) {
+      const point = dataPoints[i]
+      if (point.dataTime > 0) {
+        validTimeCount++
+        if (point.dataTime < minTime) minTime = point.dataTime
+        if (point.dataTime > maxTime) maxTime = point.dataTime
+      }
+    }
+    
+    if (minTime === Infinity || maxTime === -Infinity) {
       return {
         min: null,
         max: null,
@@ -391,8 +468,7 @@ function App() {
         days: 0
       }
     }
-    const minTime = Math.min(...times)
-    const maxTime = Math.max(...times)
+    
     const minDayjs = dayjs.unix(minTime)
     const maxDayjs = dayjs.unix(maxTime)
 
@@ -409,19 +485,42 @@ function App() {
     // 计算天数
     const days = maxDayjs.diff(minDayjs, 'day') + 1
 
-    // 计算平均时间间隔
-    const sortedTimes = times.sort((a, b) => a - b)
-    let totalInterval = 0
-    let intervalCount = 0
-    for (let i = 1; i < sortedTimes.length; i++) {
-      const interval = sortedTimes[i] - sortedTimes[i - 1]
-      if (interval > 0 && interval < 3600) { // 只计算1小时内的间隔
-        totalInterval += interval
-        intervalCount++
-      }
-    }
-    const avgInterval = intervalCount > 0 ? totalInterval / intervalCount : null
+    // 优化：对于大数据量，使用采样计算平均间隔
+    let avgInterval = null
     let avgIntervalText = ''
+    if (dataPoints.length <= 50000) {
+      // 小数据量：完整计算
+      const times = dataPoints.map(p => p.dataTime).filter(t => t > 0).sort((a, b) => a - b)
+      let totalInterval = 0
+      let intervalCount = 0
+      for (let i = 1; i < times.length; i++) {
+        const interval = times[i] - times[i - 1]
+        if (interval > 0 && interval < 3600) {
+          totalInterval += interval
+          intervalCount++
+        }
+      }
+      avgInterval = intervalCount > 0 ? totalInterval / intervalCount : null
+    } else {
+      // 大数据量：采样计算
+      const sampledTimes = []
+      for (let i = 0; i < dataPoints.length; i += sampleStep) {
+        const time = dataPoints[i].dataTime
+        if (time > 0) sampledTimes.push(time)
+      }
+      sampledTimes.sort((a, b) => a - b)
+      let totalInterval = 0
+      let intervalCount = 0
+      for (let i = 1; i < sampledTimes.length; i++) {
+        const interval = sampledTimes[i] - sampledTimes[i - 1]
+        if (interval > 0 && interval < 3600) {
+          totalInterval += interval
+          intervalCount++
+        }
+      }
+      avgInterval = intervalCount > 0 ? totalInterval / intervalCount : null
+    }
+    
     if (avgInterval) {
       if (avgInterval >= 60) {
         avgIntervalText = `${Math.round(avgInterval / 60)}分`
@@ -439,7 +538,7 @@ function App() {
       defaultPicker: dayjs.unix(defaultTime),
       duration,
       durationText,
-      pointCount: times.length,
+      pointCount: validTimeCount * (dataPoints.length / Math.min(sampleSize, dataPoints.length)),
       avgInterval,
       avgIntervalText,
       days
@@ -524,18 +623,17 @@ function App() {
     }
   }, [timeRange])
 
-  // 筛选后的数据点
+  // 筛选后的数据点 - 优化版本，支持大数据量
   const filteredDataPoints = useMemo(() => {
-    let filtered = [...dataPoints]
-
+    // 优化：单次遍历应用所有筛选条件，避免多次遍历
+    const filters = []
+    
     // 时间范围筛选
     if (tableFilters.timeRange && tableFilters.timeRange.length === 2) {
       const [start, end] = tableFilters.timeRange
       const startTime = start.unix()
       const endTime = end.unix()
-      filtered = filtered.filter(point => 
-        point.dataTime >= startTime && point.dataTime <= endTime
-      )
+      filters.push(point => point.dataTime >= startTime && point.dataTime <= endTime)
     }
 
     // 经度筛选（范围）
@@ -543,7 +641,7 @@ function App() {
       const minLng = tableFilters.longitude.min ? parseFloat(tableFilters.longitude.min) : null
       const maxLng = tableFilters.longitude.max ? parseFloat(tableFilters.longitude.max) : null
       if (minLng !== null || maxLng !== null) {
-        filtered = filtered.filter(point => {
+        filters.push(point => {
           if (minLng !== null && maxLng !== null) {
             return point.longitude >= minLng && point.longitude <= maxLng
           } else if (minLng !== null) {
@@ -561,7 +659,7 @@ function App() {
       const minLat = tableFilters.latitude.min ? parseFloat(tableFilters.latitude.min) : null
       const maxLat = tableFilters.latitude.max ? parseFloat(tableFilters.latitude.max) : null
       if (minLat !== null || maxLat !== null) {
-        filtered = filtered.filter(point => {
+        filters.push(point => {
           if (minLat !== null && maxLat !== null) {
             return point.latitude >= minLat && point.latitude <= maxLat
           } else if (minLat !== null) {
@@ -579,7 +677,7 @@ function App() {
       const minSpeed = tableFilters.speed.min ? parseFloat(tableFilters.speed.min) : null
       const maxSpeed = tableFilters.speed.max ? parseFloat(tableFilters.speed.max) : null
       if (minSpeed !== null || maxSpeed !== null) {
-        filtered = filtered.filter(point => {
+        filters.push(point => {
           if (minSpeed !== null && maxSpeed !== null) {
             return point.speed >= minSpeed && point.speed <= maxSpeed
           } else if (minSpeed !== null) {
@@ -597,7 +695,7 @@ function App() {
       const minAltitude = tableFilters.altitude.min ? parseFloat(tableFilters.altitude.min) : null
       const maxAltitude = tableFilters.altitude.max ? parseFloat(tableFilters.altitude.max) : null
       if (minAltitude !== null || maxAltitude !== null) {
-        filtered = filtered.filter(point => {
+        filters.push(point => {
           if (minAltitude !== null && maxAltitude !== null) {
             return point.altitude >= minAltitude && point.altitude <= maxAltitude
           } else if (minAltitude !== null) {
@@ -607,6 +705,20 @@ function App() {
           }
           return true
         })
+      }
+    }
+
+    // 如果没有筛选条件，直接返回原数据（避免复制）
+    if (filters.length === 0) {
+      return dataPoints
+    }
+
+    // 单次遍历应用所有筛选条件
+    const filtered = []
+    for (let i = 0; i < dataPoints.length; i++) {
+      const point = dataPoints[i]
+      if (filters.every(filter => filter(point))) {
+        filtered.push(point)
       }
     }
 
@@ -637,6 +749,50 @@ function App() {
     const pointIds = new Set(filteredDataPoints.map(p => p.id))
     setSelectedPoints(pointIds)
     message.success(`已选中 ${filteredDataPoints.length} 个坐标点`)
+  }, [filteredDataPoints])
+
+  // 反选筛选后的点
+  const handleInvertSelection = useCallback(() => {
+    if (filteredDataPoints.length === 0) {
+      message.warning('没有可选择的点')
+      return
+    }
+    
+    // 先计算当前在筛选后的点中已选中的数量
+    const currentSelectedCount = filteredDataPoints.filter(p => selectedPoints.has(p.id)).length
+    const newSelectedCount = filteredDataPoints.length - currentSelectedCount
+    
+    setSelectedPoints(prev => {
+      const newSet = new Set(prev)
+      // 遍历筛选后的点，切换选择状态
+      filteredDataPoints.forEach(point => {
+        if (newSet.has(point.id)) {
+          newSet.delete(point.id)
+        } else {
+          newSet.add(point.id)
+        }
+      })
+      return newSet
+    })
+    
+    message.success(`已反选，当前选中 ${newSelectedCount} 个坐标点`)
+  }, [filteredDataPoints, selectedPoints])
+
+  // 优化：表格显示数据（大数据量时使用采样）
+  const tableDisplayData = useMemo(() => {
+    // 当筛选后的数据量很大时，使用采样显示以提高性能
+    // 但保留完整数据用于选择和导出
+    const MAX_TABLE_DISPLAY = 50000 // 表格最多显示5万条
+    if (filteredDataPoints.length > MAX_TABLE_DISPLAY) {
+      // 均匀采样
+      const sampleStep = Math.ceil(filteredDataPoints.length / MAX_TABLE_DISPLAY)
+      const sampled = []
+      for (let i = 0; i < filteredDataPoints.length; i += sampleStep) {
+        sampled.push(filteredDataPoints[i])
+      }
+      return sampled
+    }
+    return filteredDataPoints
   }, [filteredDataPoints])
 
   // 表格列定义
@@ -718,7 +874,7 @@ function App() {
     <Layout className="app-layout">
       <Header className="app-header">
         <Title level={3} style={{ color: '#fff', margin: 0 }}>
-          StepLife Toolkit - 坐标管理工具
+          StepLife Toolkit - 一生足迹坐标管理工具
         </Title>
       </Header>
       <Content className="app-content">
@@ -854,43 +1010,73 @@ function App() {
 
                     {/* 操作按钮区域 */}
                     <div style={{
-                      display: 'grid',
-                      gridTemplateColumns: '1fr 1fr',
-                      gap: '6px'
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: '8px'
                     }}>
-                      <Button
-                        type="primary"
-                        icon={<CheckCircleOutlined />}
-                        onClick={handleSelectAllFiltered}
-                        disabled={filteredDataPoints.length === 0}
-                        size="small"
-                        style={{ width: '100%' }}
-                      >
-                        全选 ({filteredDataPoints.length})
-                      </Button>
+                      {/* 选择操作组 */}
+                      <div style={{
+                        display: 'grid',
+                        gridTemplateColumns: '1fr 1fr 1fr',
+                        gap: '6px'
+                      }}>
+                        <Button
+                          type="primary"
+                          icon={<CheckCircleOutlined />}
+                          onClick={handleSelectAllFiltered}
+                          disabled={filteredDataPoints.length === 0}
+                          size="small"
+                          style={{ width: '100%' }}
+                        >
+                          全选
+                        </Button>
 
-                      <Button
-                        icon={<CloseCircleOutlined />}
-                        onClick={handleClearSelection}
-                        disabled={selectedPoints.size === 0}
-                        size="small"
-                        style={{ width: '100%' }}
-                      >
-                        取消 ({selectedPoints.size})
-                      </Button>
+                        <Button
+                          icon={<SwapOutlined />}
+                          onClick={handleInvertSelection}
+                          disabled={filteredDataPoints.length === 0}
+                          size="small"
+                          style={{ width: '100%' }}
+                        >
+                          反选
+                        </Button>
 
+                        <Button
+                          icon={<CloseCircleOutlined />}
+                          onClick={handleClearSelection}
+                          disabled={selectedPoints.size === 0}
+                          size="small"
+                          style={{ width: '100%' }}
+                        >
+                          取消
+                        </Button>
+                      </div>
+
+                      {/* 数据统计信息 */}
+                      <div style={{
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'center',
+                        padding: '6px 8px',
+                        backgroundColor: '#f5f5f5',
+                        borderRadius: '4px',
+                        fontSize: '11px',
+                        color: '#666'
+                      }}>
+                        <span>筛选: <strong>{filteredDataPoints.length.toLocaleString()}</strong></span>
+                        <span>已选: <strong style={{ color: selectedPoints.size > 0 ? '#1890ff' : '#666' }}>{selectedPoints.size.toLocaleString()}</strong></span>
+                      </div>
+
+                      {/* 删除操作 */}
                       <Button
                         danger
                         icon={<DeleteRowOutlined />}
                         onClick={handleDeleteSelected}
                         disabled={selectedPoints.size === 0}
                         size="small"
-                        style={{
-                          width: '100%',
-                          gridColumn: '1 / -1' // 跨两列
-                        }}
+                        style={{ width: '100%' }}
                       >
-                        删除选中 ({selectedPoints.size})
+                        删除选中 ({selectedPoints.size.toLocaleString()})
                       </Button>
                     </div>
                   </div>
@@ -1089,47 +1275,6 @@ function App() {
                   </div>
                 </Card>
 
-                {/* 数据统计卡片 */}
-                {selectedPoints.size > 0 && (
-                  <Card
-                    size="small"
-                    title="选择统计"
-                    headStyle={{
-                      fontSize: '12px',
-                      fontWeight: 500,
-                      color: '#595959',
-                      padding: '8px 12px',
-                      minHeight: 'auto'
-                    }}
-                    bodyStyle={{
-                      padding: '12px'
-                    }}
-                  >
-                    <div style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '8px',
-                      padding: '8px',
-                      backgroundColor: '#fff7e6',
-                      borderRadius: '6px',
-                      border: '1px solid #ffe7ba'
-                    }}>
-                      <CheckSquareOutlined style={{
-                        color: '#fa8c16',
-                        fontSize: '16px'
-                      }} />
-                      <div style={{ flex: 1 }}>
-                        <div style={{
-                          fontSize: '14px',
-                          fontWeight: 600,
-                          color: '#fa8c16'
-                        }}>
-                          {selectedPoints.size.toLocaleString()} 个已选择
-                        </div>
-                      </div>
-                    </div>
-                  </Card>
-                )}
               </Space>
             </div>
             
@@ -1330,14 +1475,20 @@ function App() {
                     <div style={{ flex: 1, overflow: 'auto', minHeight: 0 }}>
                       <Table
                         columns={tableColumns}
-                        dataSource={filteredDataPoints}
+                        dataSource={tableDisplayData}
                         rowKey="id"
                         size="small"
                         pagination={{
                           pageSize: pageSize,
                           showSizeChanger: true,
-                          showTotal: (total) => `共 ${total} 条`,
-                          pageSizeOptions: ['20', '30', '50', '100'],
+                          showTotal: (total, range) => {
+                            const actualTotal = filteredDataPoints.length
+                            if (actualTotal > 50000) {
+                              return `显示 ${range[0]}-${range[1]} 条（共 ${actualTotal.toLocaleString()} 条，已采样显示）`
+                            }
+                            return `共 ${actualTotal.toLocaleString()} 条`
+                          },
+                          pageSizeOptions: ['20', '30', '50', '100', '200'],
                           showQuickJumper: true,
                           position: ['bottomRight'],
                           onShowSizeChange: (current, size) => {

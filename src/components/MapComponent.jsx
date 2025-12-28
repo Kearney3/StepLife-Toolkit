@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState, useImperativeHandle, forwardRef, useMemo, useCallback } from 'react'
-import { MapContainer, TileLayer, useMap, Rectangle, useMapEvents } from 'react-leaflet'
+import { MapContainer, TileLayer, useMap, Rectangle } from 'react-leaflet'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 
@@ -15,10 +15,36 @@ L.Icon.Default.mergeOptions({
 function CanvasLayer({ dataPoints, selectedPoints, onPointClick, isSelecting, pointColor, selectedColor, pointSize }) {
   const map = useMap()
   const canvasRef = useRef(null)
+  const animationFrameRef = useRef(null)
   const [bounds, setBounds] = useState(map.getBounds())
   const [zoom, setZoom] = useState(map.getZoom())
 
-  // 防抖函数
+  // 更新视口和缩放级别
+  const updateView = useCallback(() => {
+    setBounds(map.getBounds())
+    setZoom(map.getZoom())
+  }, [map])
+
+  // 实时更新函数（用于地图移动中）
+  const updateViewRealtime = useCallback(() => {
+    const newBounds = map.getBounds()
+    const newZoom = map.getZoom()
+    setBounds(prevBounds => {
+      // 如果边界变化不大，避免不必要的重新渲染
+      if (prevBounds &&
+          Math.abs(prevBounds.getNorth() - newBounds.getNorth()) < 0.0001 &&
+          Math.abs(prevBounds.getSouth() - newBounds.getSouth()) < 0.0001 &&
+          Math.abs(prevBounds.getEast() - newBounds.getEast()) < 0.0001 &&
+          Math.abs(prevBounds.getWest() - newBounds.getWest()) < 0.0001 &&
+          newZoom === zoom) {
+        return prevBounds
+      }
+      return newBounds
+    })
+    setZoom(newZoom)
+  }, [map, zoom])
+
+  // 防抖函数（用于最终位置更新）
   const debounce = useCallback((func, wait) => {
     let timeout
     return function executedFunction(...args) {
@@ -31,100 +57,146 @@ function CanvasLayer({ dataPoints, selectedPoints, onPointClick, isSelecting, po
     }
   }, [])
 
-  // 更新视口和缩放级别
-  const updateView = useCallback(() => {
-    setBounds(map.getBounds())
-    setZoom(map.getZoom())
-  }, [map])
-
-  // 防抖的更新函数
-  const debouncedUpdateView = useMemo(
-    () => debounce(updateView, 100),
+  // 防抖的最终位置更新（延迟更短）
+  const debouncedFinalUpdate = useMemo(
+    () => debounce(updateView, 16), // 约60fps
     [updateView, debounce]
   )
 
   // 监听地图移动和缩放
   useEffect(() => {
-    map.on('moveend', updateView)
-    map.on('zoomend', updateView)
-    map.on('move', debouncedUpdateView)
-    map.on('zoom', debouncedUpdateView)
+    // 实时监听移动和缩放事件，立即更新
+    const handleMove = () => updateViewRealtime()
+    const handleZoom = () => updateViewRealtime()
+
+    // 最终位置更新（防抖）
+    const handleMoveEnd = () => debouncedFinalUpdate()
+    const handleZoomEnd = () => debouncedFinalUpdate()
+
+    map.on('move', handleMove)
+    map.on('zoom', handleZoom)
+    map.on('moveend', handleMoveEnd)
+    map.on('zoomend', handleZoomEnd)
 
     return () => {
-      map.off('moveend', updateView)
-      map.off('zoomend', updateView)
-      map.off('move', debouncedUpdateView)
-      map.off('zoom', debouncedUpdateView)
+      map.off('move', handleMove)
+      map.off('zoom', handleZoom)
+      map.off('moveend', handleMoveEnd)
+      map.off('zoomend', handleZoomEnd)
     }
-  }, [map, updateView, debouncedUpdateView])
+  }, [map, updateViewRealtime, debouncedFinalUpdate])
 
-  // 计算可见点和采样
+  // 计算可见点和采样 - 优化版本，支持100万个点
   const visiblePoints = useMemo(() => {
-    if (dataPoints.length === 0) return []
+    if (dataPoints.length === 0 || !bounds) return []
 
-    // 视口裁剪 - 只保留在当前视口内的点
-    const visible = dataPoints.filter(point => {
-      return bounds.contains([point.latitude, point.longitude])
-    })
-
-    // 根据缩放级别采样
-    // 缩放级别越低，采样越多（显示更少的点）
-    let sampleRate = 1
-    if (zoom < 10) {
-      sampleRate = Math.max(1, Math.floor(visible.length / 5000)) // 最多显示5000个点
-    } else if (zoom < 12) {
-      sampleRate = Math.max(1, Math.floor(visible.length / 10000)) // 最多显示10000个点
-    } else if (zoom < 14) {
-      sampleRate = Math.max(1, Math.floor(visible.length / 20000)) // 最多显示20000个点
+    // 优化：使用更高效的视口裁剪算法
+    // 对于大数据量，先进行粗略的空间筛选
+    const north = bounds.getNorth()
+    const south = bounds.getSouth()
+    const east = bounds.getEast()
+    const west = bounds.getWest()
+    
+    // 快速预筛选：只检查边界框，避免调用 contains 方法
+    const visible = []
+    for (let i = 0; i < dataPoints.length; i++) {
+      const point = dataPoints[i]
+      if (point.latitude >= south && point.latitude <= north &&
+          point.longitude >= west && point.longitude <= east) {
+        visible.push(point)
+      }
     }
-    // zoom >= 14 时显示所有点
+
+    // 根据缩放级别和点密度采样
+    // 缩放级别越低，采样越多（显示更少的点）
+    const totalVisible = visible.length
+    let sampleRate = 1
+    let maxPoints = 10000 // 默认最多显示10000个点
+
+    // 优化：根据数据总量和缩放级别动态调整采样策略
+    if (dataPoints.length > 500000) {
+      // 超大数据量（50万+）：更激进的采样
+      if (zoom < 10) {
+        maxPoints = 2000
+      } else if (zoom < 12) {
+        maxPoints = 4000
+      } else if (zoom < 14) {
+        maxPoints = 6000
+      } else {
+        maxPoints = 8000
+      }
+    } else if (dataPoints.length > 100000) {
+      // 大数据量（10万+）：中等采样
+      if (zoom < 10) {
+        maxPoints = 3000
+      } else if (zoom < 12) {
+        maxPoints = 5000
+      } else if (zoom < 14) {
+        maxPoints = 7000
+      } else {
+        maxPoints = 10000
+      }
+    } else if (totalVisible > 10000) {
+      // 可见点数量多：根据缩放级别调整
+      if (zoom < 10) {
+        maxPoints = 3000
+      } else if (zoom < 12) {
+        maxPoints = 5000
+      } else if (zoom < 14) {
+        maxPoints = 8000
+      } else {
+        maxPoints = 10000
+      }
+    } else if (totalVisible > 5000) {
+      maxPoints = 8000
+    }
+
+    if (totalVisible > maxPoints) {
+      sampleRate = Math.max(1, Math.floor(totalVisible / maxPoints))
+    }
 
     if (sampleRate === 1) {
       return visible
     }
 
-    // 采样
-    return visible.filter((_, index) => index % sampleRate === 0)
+    // 优化采样算法：使用更均匀的分布，保持空间分布
+    const result = []
+    for (let i = 0; i < visible.length; i += sampleRate) {
+      result.push(visible[i])
+    }
+    return result
   }, [dataPoints, bounds, zoom])
 
-  // 渲染 Canvas
+  // 渲染 Canvas - 使用requestAnimationFrame优化性能
   useEffect(() => {
-    const canvas = canvasRef.current
-    if (!canvas) return
+    const renderCanvas = () => {
+      const canvas = canvasRef.current
+      if (!canvas) return
 
-    const ctx = canvas.getContext('2d')
-    const container = map.getContainer()
-    
-    // 设置 Canvas 尺寸（考虑设备像素比以获得清晰的渲染）
-    const dpr = window.devicePixelRatio || 1
-    const rect = container.getBoundingClientRect()
-    canvas.width = rect.width * dpr
-    canvas.height = rect.height * dpr
-    canvas.style.width = rect.width + 'px'
-    canvas.style.height = rect.height + 'px'
-    ctx.scale(dpr, dpr)
+      const ctx = canvas.getContext('2d')
+      const container = map.getContainer()
 
-    // 清空画布
-    ctx.clearRect(0, 0, rect.width, rect.height)
+      // 设置 Canvas 尺寸（考虑设备像素比以获得清晰的渲染）
+      const dpr = window.devicePixelRatio || 1
+      const rect = container.getBoundingClientRect()
+      const canvasWidth = rect.width * dpr
+      const canvasHeight = rect.height * dpr
 
-    if (visiblePoints.length === 0) return
-
-    // 渲染点
-    visiblePoints.forEach(point => {
-      const isSelected = selectedPoints.has(point.id)
-      const pointPos = map.latLngToContainerPoint([point.latitude, point.longitude])
-
-      // 只渲染在视口内的点（添加一些边距以处理边界情况）
-      const margin = 20
-      if (
-        pointPos.x < -margin || pointPos.x > rect.width + margin ||
-        pointPos.y < -margin || pointPos.y > rect.height + margin
-      ) {
-        return
+      // 只有当尺寸真正改变时才重新设置Canvas尺寸
+      if (canvas.width !== canvasWidth || canvas.height !== canvasHeight) {
+        canvas.width = canvasWidth
+        canvas.height = canvasHeight
+        canvas.style.width = rect.width + 'px'
+        canvas.style.height = rect.height + 'px'
+        ctx.scale(dpr, dpr)
       }
 
-      // 绘制点（无边框）
-      // 根据点大小设置半径
+      // 清空画布
+      ctx.clearRect(0, 0, rect.width, rect.height)
+
+      if (visiblePoints.length === 0) return
+
+      // 预计算点大小配置
       const sizeMap = {
         '1': { normal: 2, selected: 3 },   // extra-small
         '2': { normal: 3, selected: 4 },   // small
@@ -133,14 +205,77 @@ function CanvasLayer({ dataPoints, selectedPoints, onPointClick, isSelecting, po
         '5': { normal: 8, selected: 10 }   // extra-large
       }
       const sizeConfig = sizeMap[pointSize] || sizeMap['3']
-      const radius = isSelected ? sizeConfig.selected : sizeConfig.normal
-      
-      ctx.beginPath()
-      ctx.arc(pointPos.x, pointPos.y, radius, 0, 2 * Math.PI)
-      ctx.fillStyle = isSelected ? selectedColor : pointColor
-      ctx.fill()
-    })
+
+      // 批量渲染优化：分离选中和未选中点
+      const normalPoints = []
+      const selectedPointsList = []
+
+      visiblePoints.forEach(point => {
+        const pointPos = map.latLngToContainerPoint([point.latitude, point.longitude])
+
+        // 只渲染在视口内的点（添加一些边距以处理边界情况）
+        const margin = 20
+        if (
+          pointPos.x < -margin || pointPos.x > rect.width + margin ||
+          pointPos.y < -margin || pointPos.y > rect.height + margin
+        ) {
+          return
+        }
+
+        if (selectedPoints.has(point.id)) {
+          selectedPointsList.push(pointPos)
+        } else {
+          normalPoints.push(pointPos)
+        }
+      })
+
+      // 批量渲染普通点
+      if (normalPoints.length > 0) {
+        ctx.fillStyle = pointColor
+        ctx.beginPath()
+        normalPoints.forEach(pos => {
+          ctx.moveTo(pos.x + sizeConfig.normal, pos.y)
+          ctx.arc(pos.x, pos.y, sizeConfig.normal, 0, 2 * Math.PI)
+        })
+        ctx.fill()
+      }
+
+      // 批量渲染选中点
+      if (selectedPointsList.length > 0) {
+        ctx.fillStyle = selectedColor
+        ctx.beginPath()
+        selectedPointsList.forEach(pos => {
+          ctx.moveTo(pos.x + sizeConfig.selected, pos.y)
+          ctx.arc(pos.x, pos.y, sizeConfig.selected, 0, 2 * Math.PI)
+        })
+        ctx.fill()
+      }
+    }
+
+    // 取消之前的动画帧
+    if (animationFrameRef.current) {
+      cancelAnimationFrame(animationFrameRef.current)
+    }
+
+    // 请求新的动画帧进行渲染
+    animationFrameRef.current = requestAnimationFrame(renderCanvas)
+
+    // 清理函数
+    return () => {
+      if (animationFrameRef.current) {
+        cancelAnimationFrame(animationFrameRef.current)
+      }
+    }
   }, [visiblePoints, selectedPoints, map, pointColor, selectedColor, pointSize])
+
+  // 组件卸载时清理动画帧
+  useEffect(() => {
+    return () => {
+      if (animationFrameRef.current) {
+        cancelAnimationFrame(animationFrameRef.current)
+      }
+    }
+  }, [])
 
   // 处理点击事件
   const handleCanvasClick = useCallback((e) => {
@@ -228,7 +363,7 @@ function BoxSelector({ isSelecting, isBoxSelectMode, onBoxSelect, dataPoints, bo
   const touchStartTimeRef = useRef(null)
   const longPressTimerRef = useRef(null)
 
-  // 完成框选
+      // 完成框选 - 优化版本，支持大数据量
   const finishBoxSelect = useCallback((start, end) => {
     if (!start || !end) return
     
@@ -238,14 +373,37 @@ function BoxSelector({ isSelecting, isBoxSelectMode, onBoxSelect, dataPoints, bo
     
     // 如果框选区域太小（小于 10 米），不执行选择
     if (boxSize > 10) {
-      // 优化：只检查可见区域内的点
-      const visiblePoints = dataPoints.filter(point => 
-        bounds.contains([point.latitude, point.longitude])
-      )
+      // 优化：先进行快速边界框筛选，再精确检查
+      const boxNorth = boxBounds.getNorth()
+      const boxSouth = boxBounds.getSouth()
+      const boxEast = boxBounds.getEast()
+      const boxWest = boxBounds.getWest()
       
-      const selectedIds = visiblePoints
-        .filter(point => boxBounds.contains([point.latitude, point.longitude]))
-        .map(point => point.id)
+      // 如果数据量很大，先检查可见区域内的点
+      let pointsToCheck = dataPoints
+      if (dataPoints.length > 100000 && bounds) {
+        const north = bounds.getNorth()
+        const south = bounds.getSouth()
+        const east = bounds.getEast()
+        const west = bounds.getWest()
+        pointsToCheck = dataPoints.filter(point => 
+          point.latitude >= south && point.latitude <= north &&
+          point.longitude >= west && point.longitude <= east
+        )
+      }
+      
+      // 快速边界框筛选
+      const selectedIds = []
+      for (let i = 0; i < pointsToCheck.length; i++) {
+        const point = pointsToCheck[i]
+        if (point.latitude >= boxSouth && point.latitude <= boxNorth &&
+            point.longitude >= boxWest && point.longitude <= boxEast) {
+          // 精确检查（对于边界框内的点）
+          if (boxBounds.contains([point.latitude, point.longitude])) {
+            selectedIds.push(point.id)
+          }
+        }
+      }
       
       if (selectedIds.length > 0) {
         onBoxSelect(selectedIds)
