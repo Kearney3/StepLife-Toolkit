@@ -927,9 +927,11 @@ function App() {
             href="https://github.com/Kearney3/steplife-importer-webui"
             target="_blank"
             rel="noopener noreferrer"
-            style={{ color: '#fff', fontSize: '18px', flexShrink: 0 }}
-            title="一生足迹数据导入器"
-          />
+            style={{ color: '#fff', fontSize: '16px', flexShrink: 0 }}
+            title="更多工具"
+          >
+            更多工具
+          </Button>
           <Button
             type="text"
             icon={<GithubOutlined />}
