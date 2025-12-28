@@ -1,6 +1,6 @@
 import React, { useState, useRef, useCallback, useMemo, useEffect } from 'react'
 import { Layout, Upload, Button, Space, DatePicker, message, Card, Typography, Select, ColorPicker, Table, Input } from 'antd'
-import { UploadOutlined, DeleteOutlined, DownloadOutlined, ClearOutlined, UpOutlined, DownOutlined, SelectOutlined, CheckCircleOutlined, CloseCircleOutlined, DeleteRowOutlined, DatabaseOutlined, ClockCircleOutlined, SwapOutlined, SearchOutlined, GithubOutlined, LeftOutlined, RightOutlined } from '@ant-design/icons'
+import { UploadOutlined, DeleteOutlined, DownloadOutlined, ClearOutlined, UpOutlined, DownOutlined, SelectOutlined, CheckCircleOutlined, CloseCircleOutlined, DeleteRowOutlined, DatabaseOutlined, ClockCircleOutlined, SwapOutlined, SearchOutlined, GithubOutlined, LeftOutlined, RightOutlined, ToolOutlined } from '@ant-design/icons'
 import Papa from 'papaparse'
 import dayjs from 'dayjs'
 import MapComponent from './components/MapComponent'
@@ -920,15 +920,26 @@ function App() {
         <Title level={3} style={{ color: '#fff', margin: 0, fontSize: 'clamp(14px, 2vw, 20px)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: '1 1 auto', minWidth: 0 }}>
           StepLife Toolkit - 一生足迹坐标管理工具
         </Title>
-        <Button
-          type="text"
-          icon={<GithubOutlined />}
-          href="https://github.com/Kearney3/StepLife-Toolkit"
-          target="_blank"
-          rel="noopener noreferrer"
-          style={{ color: '#fff', fontSize: '18px', flexShrink: 0 }}
-          title="查看 GitHub 仓库"
-        />
+        <Space>
+          <Button
+            type="text"
+            icon={<ToolOutlined />}
+            href="https://github.com/Kearney3/steplife-importer-webui"
+            target="_blank"
+            rel="noopener noreferrer"
+            style={{ color: '#fff', fontSize: '18px', flexShrink: 0 }}
+            title="一生足迹数据导入器"
+          />
+          <Button
+            type="text"
+            icon={<GithubOutlined />}
+            href="https://github.com/Kearney3/StepLife-Toolkit"
+            target="_blank"
+            rel="noopener noreferrer"
+            style={{ color: '#fff', fontSize: '18px', flexShrink: 0 }}
+            title="查看 GitHub 仓库"
+          />
+        </Space>
       </Header>
       <Content className="app-content">
         <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
