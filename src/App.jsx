@@ -93,16 +93,32 @@ function Splitter({ onResize, minLeft = 200, minRight = 300 }) {
   )
 }
 
+// 计算合适的选中颜色（与主颜色形成对比）
+function getContrastColor(mainColor) {
+  // 预定义的对比色映射
+  const contrastMap = {
+    '#1890ff': '#fa8c16', // 蓝色 -> 橙色
+    '#52c41a': '#f5222d', // 绿色 -> 红色
+    '#fa8c16': '#1890ff', // 橙色 -> 蓝色
+    '#722ed1': '#52c41a', // 紫色 -> 绿色
+    '#13c2c2': '#722ed1', // 青色 -> 紫色
+    '#f5222d': '#1890ff', // 红色 -> 蓝色
+    '#eb2f96': '#fa8c16'  // 粉色 -> 橙色
+  }
+
+  return contrastMap[mainColor] || '#1890ff' // 默认返回蓝色
+}
+
 // 预设颜色样式
 const PRESET_COLORS = [
-  { name: '蓝色', color: '#1890ff', selectedColor: '#ff4d4f' },
-  { name: '绿色', color: '#52c41a', selectedColor: '#ff4d4f' },
-  { name: '橙色', color: '#fa8c16', selectedColor: '#ff4d4f' },
-  { name: '紫色', color: '#722ed1', selectedColor: '#ff4d4f' },
-  { name: '青色', color: '#13c2c2', selectedColor: '#ff4d4f' },
-  { name: '红色', color: '#f5222d', selectedColor: '#ff4d4f' },
-  { name: '粉色', color: '#eb2f96', selectedColor: '#ff4d4f' },
-  { name: '自定义', color: null, selectedColor: '#ff4d4f' }
+  { name: '蓝色', color: '#1890ff', selectedColor: '#fa8c16' },
+  { name: '绿色', color: '#52c41a', selectedColor: '#f5222d' },
+  { name: '橙色', color: '#fa8c16', selectedColor: '#1890ff' },
+  { name: '紫色', color: '#722ed1', selectedColor: '#52c41a' },
+  { name: '青色', color: '#13c2c2', selectedColor: '#722ed1' },
+  { name: '红色', color: '#f5222d', selectedColor: '#1890ff' },
+  { name: '粉色', color: '#eb2f96', selectedColor: '#fa8c16' },
+  { name: '自定义', color: null, selectedColor: '#1890ff' }
 ]
 
 function App() {
@@ -117,7 +133,7 @@ function App() {
   const [isSelecting, setIsSelecting] = useState(false)
   const [isBoxSelectMode, setIsBoxSelectMode] = useState(false)
   const [pointColor, setPointColor] = useState('#1890ff')
-  const [selectedColor, setSelectedColor] = useState('#ff4d4f')
+  const [selectedColor, setSelectedColor] = useState(getContrastColor('#1890ff'))
   const [colorMode, setColorMode] = useState('preset')
   const [customColor, setCustomColor] = useState('#1890ff')
   const [pointSize, setPointSize] = useState('3') // 1-5: extra-small, small, medium, large, extra-large
@@ -904,6 +920,7 @@ function App() {
                           if (value === 'custom') {
                             setColorMode('custom')
                             setPointColor(customColor)
+                            setSelectedColor(getContrastColor(customColor))
                           } else {
                             const preset = PRESET_COLORS.find(p => p.color === value) || PRESET_COLORS[0]
                             setPointColor(preset.color)
@@ -940,8 +957,10 @@ function App() {
                       <ColorPicker
                         value={pointColor}
                         onChange={(color) => {
-                          setPointColor(color.toHexString())
-                          setCustomColor(color.toHexString())
+                          const hexColor = color.toHexString()
+                          setPointColor(hexColor)
+                          setCustomColor(hexColor)
+                          setSelectedColor(getContrastColor(hexColor))
                         }}
                         size="small"
                         showText
